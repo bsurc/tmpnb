@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"strings"
@@ -160,6 +161,8 @@ func passThroughHandler(w http.ResponseWriter, r *http.Request) {
 		newNotebookHandler(w, r)
 		return
 	}
+	rp := httputil.ReverseProxy{}
+
 	url := url.URL{
 		Scheme: "http",
 		Host:   fmt.Sprintf("%s:%d", strings.Split(r.Host, ":")[0], port),
