@@ -7,13 +7,14 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
+	"path"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -24,79 +25,94 @@ import (
 const (
 	defaultNotebook = "jupyter/minimal-notebook"
 	//defaultNotebook = "ksshannon/scipy-notebook-ext"
+
+	containerLifetime = time.Minute
 )
 
 var (
-	availableContainers = map[string]struct{}{}
-	containerMap        = map[string]*types.Container{}
-	userPortMap         = map[string]int{}
-	currentPort         int
+	availableImages = map[string]struct{}{}
+
+	containerLock sync.Mutex
+	containerMap  = map[string]*tempNotebook{}
+	portLock      sync.Mutex
+	currentPort   int
+	mux           = http.NewServeMux()
+	ports         = newPortBitmap(8000, 100)
 )
 
-func init() {
-	currentPort = 8000
-	cli, err := client.NewEnvClient()
-	if err != nil {
-		panic(err)
-	}
-	images, err := cli.ImageList(context.Background(), types.ImageListOptions{})
-	if err != nil {
-		panic(err)
-	}
-	for _, image := range images {
-		availableContainers[strings.Split(image.RepoTags[0], ":")[0]] = struct{}{}
-	}
+type portRange struct {
+	mu     sync.Mutex
+	bits   uint32
+	start  int
+	length int
 }
 
-func newNotebookHandler(w http.ResponseWriter, r *http.Request) {
-	// Get a new id
-	var buf [16]byte
-	_, err := rand.Read(buf[:])
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Print(err)
-		return
-	}
-	hash := fmt.Sprintf("%x", string(buf[:]))
+func newPortBitmap(start, length int) *portRange {
+	return &portRange{start: start, length: length}
+}
 
-	if _, ok := containerMap[hash]; ok {
-		http.Error(w, "user hash collision", http.StatusInternalServerError)
-		log.Print("user hash collision")
-		return
+func (pr *portRange) Acquire() (int, error) {
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+	for p := uint(0); p < uint(pr.length); p++ {
+		if pr.bits&(1<<p) == 0 {
+			pr.bits |= (1 << p)
+			return int(p) + pr.start, nil
+		}
 	}
+	return -1, fmt.Errorf("port range full")
+}
 
-	err = r.ParseForm()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		log.Print(err)
-		return
+func (pr *portRange) Drop(p int) error {
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+	if p < pr.start || p >= pr.start+pr.length {
+		return fmt.Errorf("port out of range")
 	}
+	pr.bits &= ^(1 << uint(p-pr.start))
+	return nil
+}
 
-	var imageName = r.FormValue("image")
-	if imageName == "" {
-		imageName = defaultNotebook
-	}
+func init() {
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
+}
 
+type tempNotebook struct {
+	id, hash     string
+	created      time.Time
+	lastAccessed time.Time
+	port         int
+}
+
+func newTempNotebook(image string) (*tempNotebook, error) {
+	t := new(tempNotebook)
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		log.Print(err)
-		return
+		return t, err
 	}
 
-	out, err := cli.ImagePull(ctx, imageName, types.ImagePullOptions{})
+	_, err = cli.ImagePull(ctx, image, types.ImagePullOptions{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		log.Print(err)
-		return
+		return t, err
 	}
-	io.Copy(os.Stdout, out)
 
-	port := fmt.Sprintf("%d", currentPort)
+	var buf [32]byte
+	_, err = rand.Read(buf[:])
+	if err != nil {
+		return t, err
+	}
+	hash := fmt.Sprintf("%x", buf)
+	basePath := fmt.Sprintf("--NotebookApp.base_url=%s", path.Join("/book", hash))
+
+	port, err := ports.Acquire()
+	if err != nil {
+		return t, err
+	}
+	portString := fmt.Sprintf("%d", port)
 
 	var pSet = nat.PortSet{}
-	p, err := nat.NewPort("tcp", port)
+	p, err := nat.NewPort("tcp", portString)
 	pSet[p] = struct{}{}
 	containerConfig := container.Config{
 		Hostname: "0.0.0.0",
@@ -105,16 +121,15 @@ func newNotebookHandler(w http.ResponseWriter, r *http.Request) {
 			`notebook`,
 			`--no-browser`,
 			`--port`,
-			port,
-			//`{port}`,
+			portString,
 			`--ip=0.0.0.0`,
-			`--NotebookApp.base_url=/`,
+			basePath,
 			`--NotebookApp.port_retries=0`,
 			`--NotebookApp.token="ABCD"`,
 			`--NotebookApp.disable_check_xsrf=True`,
 		},
 		Env:          []string{"CONFIGPROXY_AUTH_TOKEN=ABCD"},
-		Image:        imageName,
+		Image:        image,
 		ExposedPorts: pSet,
 	}
 
@@ -127,52 +142,122 @@ func newNotebookHandler(w http.ResponseWriter, r *http.Request) {
 		//DNS             []string          `json:"Dns"`        // List of DNS server to lookup
 	}
 
-	resp, err := cli.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, "test_"+port)
+	resp, err := cli.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, "")
+	if err != nil {
+		return t, err
+	}
+
+	if err := cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
+		return t, err
+	}
+	t = &tempNotebook{resp.ID, hash, time.Now(), time.Now(), port}
+	containerLock.Lock()
+	containerMap[hash] = t
+	containerLock.Unlock()
+	return t, nil
+}
+
+func newNotebookHandler(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseForm()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		log.Print(err)
 		return
 	}
 
-	if err := cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
+	var imageName = r.FormValue("image")
+	if imageName == "" {
+		imageName = defaultNotebook
+	}
+
+	tmpnb, err := newTempNotebook(imageName)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		log.Print(err)
 		return
 	}
-	fmt.Println(resp.ID)
-	userPortMap[hash] = currentPort
-	currentPort++
-	log.Printf("port: %s, hash: %s", port, hash)
-	rdu := r.URL
-	rdu.Path = "/book/" + hash
-	log.Printf("rd url: %s", rdu.String())
-	http.Redirect(w, r, rdu.String(), http.StatusContinue)
 
-	//rp := httputil.NewSingleHostReverseProxy(
+	proxyURL := url.URL{
+		Scheme: "http",
+		Host:   fmt.Sprintf("localhost:%d", tmpnb.port),
+	}
+	log.Printf("reverse proxy URL: %s", proxyURL.String())
+
+	//proxy := httputil.NewSingleHostReverseProxy(&proxyURL)
+	proxy := &httputil.ReverseProxy{
+		Director: func(r *http.Request) {
+			log.Print(r.URL.String())
+			r.URL.Scheme = proxyURL.Scheme
+			r.URL.Host = proxyURL.Host
+		},
+	}
+	handlerPath := path.Join("/book", tmpnb.hash) + "/"
+	log.Printf("handler: %s", handlerPath)
+	mux.HandleFunc(handlerPath, func(w http.ResponseWriter, r *http.Request) {
+		tmpnb.lastAccessed = time.Now()
+		log.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
+		proxy.ServeHTTP(w, r)
+	})
+	fmt.Fprintln(w, "<html>")
+	fmt.Fprintf(w, `<a href="%s">click</a>`, handlerPath)
+	fmt.Fprintln(w, "</html>")
+	//http.Redirect(w, r, handlerPath, http.StatusContinue)
 }
 
-func passThroughHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
-
-	hash := r.URL.Path[6:]
-	port := userPortMap[hash]
-	log.Printf("port: %d, hash: %s", port, hash)
-	if port == 0 {
-		newNotebookHandler(w, r)
-		return
+func releaseContainers() error {
+	containerLock.Lock()
+	defer containerLock.Unlock()
+	trash := []tempNotebook{}
+	for _, c := range containerMap {
+		age := time.Now().Sub(c.lastAccessed)
+		if age.Seconds() > containerLifetime.Seconds() {
+			log.Printf("age: %v\n", age)
+			trash = append(trash, *c)
+		}
 	}
-	rp := httputil.ReverseProxy{}
-
-	url := url.URL{
-		Scheme: "http",
-		Host:   fmt.Sprintf("%s:%d", strings.Split(r.Host, ":")[0], port),
+	cli, err := client.NewEnvClient()
+	if err != nil {
+		return err
 	}
-	log.Printf("container url: %s", url.String())
-	http.Redirect(w, r, url.String(), http.StatusMovedPermanently)
+	ctx := context.Background()
+	d := time.Minute
+	for _, c := range trash {
+		log.Printf("attempting to release container %s last accessed at %v", c.id, c.lastAccessed)
+		if err := cli.ContainerStop(ctx, c.id, &d); err != nil {
+			log.Print(err)
+		}
+		if err := cli.ContainerRemove(ctx, c.id, types.ContainerRemoveOptions{Force: true}); err != nil {
+			log.Print(err)
+		}
+		ports.Drop(c.port)
+		delete(containerMap, c.hash)
+	}
+	return nil
 }
 
 func main() {
-	http.HandleFunc("/", newNotebookHandler)
-	http.HandleFunc("/book/", passThroughHandler)
-	log.Fatal(http.ListenAndServe(":8888", nil))
+	currentPort = 8000
+	cli, err := client.NewEnvClient()
+	if err != nil {
+		panic(err)
+	}
+	images, err := cli.ImageList(context.Background(), types.ImageListOptions{})
+	if err != nil {
+		panic(err)
+	}
+	for _, image := range images {
+		if len(image.RepoTags) < 1 {
+			continue
+		}
+		log.Printf("found image %s", image.RepoTags[0])
+		availableImages[strings.Split(image.RepoTags[0], ":")[0]] = struct{}{}
+	}
+	go func() {
+		for {
+			time.Sleep(time.Second * 10)
+			releaseContainers()
+		}
+	}()
+	mux.HandleFunc("/new", newNotebookHandler)
+	log.Fatal(http.ListenAndServe(":8888", mux))
 }
