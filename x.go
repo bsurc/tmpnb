@@ -7,11 +7,13 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -35,7 +37,6 @@ var (
 	containerLock sync.Mutex
 	containerMap  = map[string]*tempNotebook{}
 	portLock      sync.Mutex
-	currentPort   int
 	mux           = http.NewServeMux()
 	ports         = newPortBitmap(8000, 100)
 )
@@ -235,8 +236,38 @@ func releaseContainers() error {
 	return nil
 }
 
+func listImages(w http.ResponseWriter, r *http.Request) {
+	page := `
+  <!DOCTYPE HTML>
+  <html>
+  <ul>
+    {{range . -}}
+      <li><a href="new?image={{.}}">{{.}}</a></li>
+    {{end -}}
+  </ul>
+  </html>`
+
+	tmpl, err := template.New("").Parse(page)
+	if err != nil {
+		log.Print(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	images := []string{}
+	for k := range availableImages {
+		images = append(images, k)
+	}
+	sort.Slice(images, func(i, j int) bool {
+		return images[i] < images[j]
+	})
+	err = tmpl.Execute(w, images)
+	if err != nil {
+		log.Print(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func main() {
-	currentPort = 8000
 	cli, err := client.NewEnvClient()
 	if err != nil {
 		panic(err)
@@ -258,6 +289,7 @@ func main() {
 			releaseContainers()
 		}
 	}()
+	mux.HandleFunc("/", listImages)
 	mux.HandleFunc("/new", newNotebookHandler)
 	log.Fatal(http.ListenAndServe(":8888", mux))
 }
