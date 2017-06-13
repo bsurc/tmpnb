@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"os/signal"
 	"path"
 	"sort"
 	"strings"
@@ -372,5 +374,24 @@ func main() {
 	}()
 	mux.HandleFunc("/", listImages)
 	mux.HandleFunc("/new", newNotebookHandler)
-	log.Fatal(http.ListenAndServe(":8888", mux))
+
+	quit := make(chan os.Signal)
+	signal.Notify(quit, os.Interrupt)
+	go func() {
+		<-quit
+		log.Println("Shutting down server...")
+		containerLock.Lock()
+		for hash := range containerMap {
+			containerMap[hash].lastAccessed = time.Unix(1, 0)
+		}
+		containerLock.Unlock()
+		releaseContainers()
+		os.Exit(0)
+	}()
+
+	srv := http.Server{
+		Addr:    ":8888",
+		Handler: mux,
+	}
+	log.Fatal(srv.ListenAndServe())
 }
