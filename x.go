@@ -8,7 +8,9 @@ import (
 	"crypto/rand"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -33,12 +35,12 @@ const (
 
 var (
 	availableImages = map[string]struct{}{}
-
-	containerLock sync.Mutex
-	containerMap  = map[string]*tempNotebook{}
-	portLock      sync.Mutex
-	mux           = http.NewServeMux()
-	ports         = newPortBitmap(8000, 100)
+	containerLock   sync.Mutex
+	containerMap    = map[string]*tempNotebook{}
+	portLock        sync.Mutex
+	mux             = http.NewServeMux()
+	ports           = newPortBitmap(8000, 100)
+	token           string
 )
 
 type portRange struct {
@@ -50,6 +52,68 @@ type portRange struct {
 
 func newPortBitmap(start, length int) *portRange {
 	return &portRange{start: start, length: length}
+}
+
+func isWebsocket(r *http.Request) bool {
+	//log.Printf("%+v", r.Header)
+	upgrade := false
+	for _, h := range r.Header["Connection"] {
+		if strings.Index(strings.ToLower(h), "upgrade") >= 0 {
+			upgrade = true
+			break
+		}
+	}
+	if !upgrade {
+		return false
+	}
+
+	for _, h := range r.Header["Upgrade"] {
+		if strings.Index(strings.ToLower(h), "websocket") >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// websocketProxy is @bradfitz's from:
+//
+// https://groups.google.com/forum/#!msg/golang-nuts/KBx9pDlvFOc/QC5v-uC5UOgJ
+func websocketProxy(target string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d, err := net.Dial("tcp", target)
+		if err != nil {
+			http.Error(w, "Error contacting backend server.", 500)
+			log.Printf("Error dialing websocket backend %s: %v", target, err)
+			return
+		}
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "Not a hijacker?", 500)
+			return
+		}
+		nc, _, err := hj.Hijack()
+		if err != nil {
+			log.Printf("Hijack error: %v", err)
+			return
+		}
+		defer nc.Close()
+		defer d.Close()
+
+		err = r.Write(d)
+		if err != nil {
+			log.Printf("Error copying request to target: %v", err)
+			return
+		}
+
+		errc := make(chan error, 2)
+		cp := func(dst io.Writer, src io.Reader) {
+			_, err := io.Copy(dst, src)
+			errc <- err
+		}
+		go cp(d, nc)
+		go cp(nc, d)
+		<-errc
+	})
 }
 
 func (pr *portRange) Acquire() (int, error) {
@@ -126,21 +190,21 @@ func newTempNotebook(image string) (*tempNotebook, error) {
 			`--ip=0.0.0.0`,
 			basePath,
 			`--NotebookApp.port_retries=0`,
-			`--NotebookApp.token="ABCD"`,
+			fmt.Sprintf(`--NotebookApp.token="%s"`, token),
 			`--NotebookApp.disable_check_xsrf=True`,
 		},
-		Env:          []string{"CONFIGPROXY_AUTH_TOKEN=ABCD"},
+		Env:          []string{fmt.Sprintf("CONFIGPROXY_AUTH_TOKEN=%s", token)},
 		Image:        image,
 		ExposedPorts: pSet,
 	}
 
 	hostConfig := container.HostConfig{
 		NetworkMode: "host",
+		//DNS:            []string
 		//Binds           []string      // List of volume bindings for this container
 		//NetworkMode     NetworkMode   // Network mode to use for the container
 		//PortBindings    nat.PortMap   // Port mapping between the exposed port (container) and the host
 		//AutoRemove      bool          // Automatically remove container when it exits
-		//DNS             []string          `json:"Dns"`        // List of DNS server to lookup
 	}
 
 	resp, err := cli.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, "")
@@ -184,10 +248,8 @@ func newNotebookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("reverse proxy URL: %s", proxyURL.String())
 
-	//proxy := httputil.NewSingleHostReverseProxy(&proxyURL)
 	proxy := &httputil.ReverseProxy{
 		Director: func(r *http.Request) {
-			log.Print(r.URL.String())
 			r.URL.Scheme = proxyURL.Scheme
 			r.URL.Host = proxyURL.Host
 		},
@@ -197,12 +259,24 @@ func newNotebookHandler(w http.ResponseWriter, r *http.Request) {
 	mux.HandleFunc(handlerPath, func(w http.ResponseWriter, r *http.Request) {
 		tmpnb.lastAccessed = time.Now()
 		log.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
+		if isWebsocket(r) {
+			log.Print("proxying to websocket handler")
+			f := websocketProxy(fmt.Sprintf(":%d", tmpnb.port))
+			f.ServeHTTP(w, r)
+			return
+		}
 		proxy.ServeHTTP(w, r)
 	})
+	// FIXME(kyle): check for valid connection on the tmpnb port
+	time.Sleep(time.Second)
+	handlerURL := url.URL{}
+	handlerURL.Path = handlerPath
+	q := url.Values{}
+	q.Set("token", token)
+	handlerURL.RawQuery = q.Encode()
 	fmt.Fprintln(w, "<html>")
-	fmt.Fprintf(w, `<a href="%s">click</a>`, handlerPath)
+	fmt.Fprintf(w, `<a href="%s">click</a>`, handlerURL.String())
 	fmt.Fprintln(w, "</html>")
-	//http.Redirect(w, r, handlerPath, http.StatusContinue)
 }
 
 func releaseContainers() error {
@@ -268,6 +342,13 @@ func listImages(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	var buf [32]byte
+	_, err := rand.Read(buf[:])
+	if err != nil {
+		panic(err)
+	}
+	token = fmt.Sprintf("%x", buf[:])
+	log.Printf("using token: %s", token)
 	cli, err := client.NewEnvClient()
 	if err != nil {
 		panic(err)
