@@ -32,7 +32,7 @@ import (
 const (
 	defaultNotebook = "jupyter/minimal-notebook"
 
-	containerLifetime = time.Minute
+	containerLifetime = 5 * time.Minute
 )
 
 var (
@@ -284,7 +284,7 @@ func newNotebookHandler(w http.ResponseWriter, r *http.Request) {
 	q.Set("token", token)
 	handlerURL.RawQuery = q.Encode()
 	fmt.Fprintln(w, "<html>")
-	fmt.Fprintf(w, `<a href="%s">click</a>`, handlerURL.String())
+	fmt.Fprintf(w, `<a href="%s">wait a tick, then click</a>`, handlerURL.String())
 	fmt.Fprintln(w, "</html>")
 }
 
@@ -375,7 +375,7 @@ func main() {
 	}
 	go func() {
 		for {
-			time.Sleep(time.Second * 10)
+			time.Sleep(time.Minute)
 			releaseContainers()
 		}
 	}()
