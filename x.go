@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -30,7 +31,6 @@ import (
 
 const (
 	defaultNotebook = "jupyter/minimal-notebook"
-	//defaultNotebook = "ksshannon/scipy-notebook-ext"
 
 	containerLifetime = time.Minute
 )
@@ -43,6 +43,7 @@ var (
 	mux             = http.NewServeMux()
 	ports           = newPortBitmap(8000, 100)
 	token           string
+	imageMatch      = regexp.MustCompile(`[a-zA-Z0-9]+/[a-zA-Z0-9]+-notebook[:]{0,1}[a-zA-Z0-9]*`)
 )
 
 type portRange struct {
@@ -237,6 +238,12 @@ func newNotebookHandler(w http.ResponseWriter, r *http.Request) {
 		imageName = defaultNotebook
 	}
 
+	if _, ok := availableImages[imageName]; !ok {
+		http.Error(w, fmt.Sprintf("invalid image name: %s", imageName), http.StatusBadRequest)
+		log.Printf("invalid image name: %s", imageName)
+		return
+	}
+
 	tmpnb, err := newTempNotebook(imageName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -360,7 +367,7 @@ func main() {
 		panic(err)
 	}
 	for _, image := range images {
-		if len(image.RepoTags) < 1 {
+		if len(image.RepoTags) < 1 || !imageMatch.MatchString(image.RepoTags[0]) {
 			continue
 		}
 		log.Printf("found image %s", image.RepoTags[0])
