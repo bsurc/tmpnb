@@ -26,8 +26,8 @@ import (
 )
 
 const (
-	defaultNotebook   = "jupyter/minimal-notebook"
-	containerLifetime = 5 * time.Minute
+	// defaultNotebook is used if the request doesn't specify a docker image.
+	defaultNotebook = "jupyter/minimal-notebook"
 )
 
 func init() {
@@ -51,6 +51,7 @@ var defaultConfig = serverConfig{
 	MaxContainers:     defaultMaxContainers,
 }
 
+// notebookServer handles the http tasks for the temporary notebooks.
 type notebookServer struct {
 	// pool manages the containers
 	pool *notebookPool
@@ -60,18 +61,23 @@ type notebookServer struct {
 	mux *http.ServeMux
 	// embed a server
 	*http.Server
-
+	// httpRedirect determines whether http redirects to https
 	httpRedirect bool
-	tlsCert      string
-	tlsKey       string
+	// TLS certificate path
+	tlsCert string
+	// TLS private key path
+	tlsKey string
 }
 
+// readConfig reads json config from r
 func readConfig(r io.Reader) (serverConfig, error) {
 	sc := defaultConfig
 	err := json.NewDecoder(r).Decode(&sc)
 	return sc, err
 }
 
+// newNotebookServer initializes a server and owned resources, using a
+// configuration if supplied.
 func newNotebookServer(config string) (*notebookServer, error) {
 	sc := defaultConfig
 	if config != "" {
@@ -120,6 +126,8 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	return srv, nil
 }
 
+// statusHandler checks the status of a single container, returning 200 if it
+// is running, another value otherwise.
 func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseForm()
 	if err != nil {
@@ -202,13 +210,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	pull := false
-	if s := r.FormValue("pull"); s != "" {
-		switch s {
-		case "true", "1", "yes":
-			pull = true
-		}
-	}
+	_, pull := r.Form["pull"]
 
 	tmpnb, err := srv.pool.newNotebook(imageName, pull)
 	if err != nil {
@@ -254,6 +256,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	fmt.Fprintln(w, "</html>")
 }
 
+// listImages lists html links to the different docker images.
 func (srv *notebookServer) listImages(w http.ResponseWriter, r *http.Request) {
 	page := `
   <!DOCTYPE HTML>
@@ -285,6 +288,7 @@ func (srv *notebookServer) listImages(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Start starts the http/s listener.
 func (srv *notebookServer) Start() {
 	if srv.tlsCert != "" && srv.tlsKey != "" {
 		if srv.httpRedirect {
