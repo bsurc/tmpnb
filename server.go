@@ -279,6 +279,9 @@ func (srv *notebookServer) listImages(w http.ResponseWriter, r *http.Request) {
 	page := `
   <!DOCTYPE HTML>
   <html>
+  <div>
+  <h1>Boise State University Code Lab</h1>
+  </div>
   <ul>
     {{range . -}}
       <li><a href="new?image={{.}}">{{.}}</a></li>
