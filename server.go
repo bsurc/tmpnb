@@ -60,7 +60,7 @@ type notebookServer struct {
 	// token is the generated random auth token
 	token string
 	// mux routes http traffic
-	mux *http.ServeMux
+	mux *ServeMux
 	// embed a server
 	*http.Server
 	// httpRedirect determines whether http redirects to https
@@ -104,8 +104,9 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.Server = &http.Server{
 		Addr: sc.Port,
 	}
-	srv.mux = http.NewServeMux()
-	srv.mux.HandleFunc("/", srv.listImages)
+	//srv.mux = http.NewServeMux()
+	srv.mux = new(ServeMux)
+	srv.mux.HandleFunc("/list", srv.listImages)
 	srv.mux.HandleFunc("/new", srv.newNotebookHandler)
 	srv.mux.HandleFunc("/status", srv.statusHandler)
 	if sc.EnablePProf {
@@ -130,6 +131,16 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			log.Print(err)
 		}
 		os.Exit(0)
+	}()
+	go func() {
+		for {
+			select {
+			case p := <-srv.pool.deregisterMux:
+				p += "/"
+				log.Printf("deregistering %s from mux", p)
+				srv.mux.Deregister(p)
+			}
+		}
 	}()
 	return srv, nil
 }

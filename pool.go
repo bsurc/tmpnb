@@ -78,6 +78,10 @@ type notebookPool struct {
 
 	// killCollection stops the automated resource reclamation
 	killCollection chan struct{}
+
+	// deregisterMux is a channel for sending a path that needs to be
+	// de-registered from the server mux.
+	deregisterMux chan string
 }
 
 // errNotebookPoolFull indicates the pool is at maxContainers
@@ -123,6 +127,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		maxContainers:     maxContainers,
 		containerLifetime: lifetime,
 		killCollection:    make(chan struct{}),
+		deregisterMux:     make(chan string),
 	}
 	pool.startCollector(time.Duration(int64(lifetime) / 4))
 	return pool, nil
@@ -288,10 +293,12 @@ func (p *notebookPool) releaseContainers(force bool) error {
 		if err := cli.ContainerRemove(ctx, c.id, types.ContainerRemoveOptions{Force: true}); err != nil {
 			log.Print(err)
 		}
-		// TODO(kyle): release the handler from the ServeMux, may have to add
-		// fx-ality for that.
 		p.portSet.Drop(c.port)
 		delete(p.containerMap, c.hash)
+		// This isn't very elegant, but we couldn't delete the pattern from the mux
+		// before, but now we can with the vendored/updated copy in mux.go.  We add
+		// a trailing slice when we register the path, so we must add it here too.
+		p.deregisterMux <- path.Join("/book", c.hash+"/")
 	}
 	return nil
 }
