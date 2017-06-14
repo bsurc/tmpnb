@@ -49,6 +49,7 @@ type tempNotebook struct {
 	port int
 }
 
+// notebookPool holds data regarding running notebooks.
 type notebookPool struct {
 	// guards the entire struct
 	sync.Mutex
@@ -74,10 +75,16 @@ type notebookPool struct {
 
 	// token is the security token for auto-auth
 	token string
+
+	// killCollection stops the automated resource reclamation
+	killCollection chan struct{}
 }
 
+// errNotebookPoolFull indicates the pool is at maxContainers
 var errNotebookPoolFull = errors.New("container pool hit max size limit")
 
+// newNotebookPool creates a notebookPool and sets defaults, overriding some
+// with passed arguments.
 func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Duration) (*notebookPool, error) {
 	if imageRegexp == "" {
 		imageRegexp = jupyterNotebookImageMatch
@@ -108,14 +115,17 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		log.Printf("found image %s", image.RepoTags[0])
 		imageMap[strings.Split(image.RepoTags[0], ":")[0]] = struct{}{}
 	}
-	return &notebookPool{
+	pool := &notebookPool{
 		availableImages:   imageMap,
 		imageMatch:        imageMatch,
 		containerMap:      make(map[string]*tempNotebook),
 		portSet:           newPortRange(8000, maxContainers),
 		maxContainers:     maxContainers,
 		containerLifetime: lifetime,
-	}, nil
+		killCollection:    make(chan struct{}),
+	}
+	pool.startCollector(time.Duration(int64(lifetime) / 4))
+	return pool, nil
 }
 
 // defaultHashSize is used for the unique hash generation
@@ -131,6 +141,7 @@ func newHash(n int) string {
 	return fmt.Sprintf("%x", b)
 }
 
+// newNotebook initializes and sets values for a new notebook.
 func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, error) {
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
@@ -199,6 +210,7 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 	return t, nil
 }
 
+// size returns the size of the containerMap with appropriate locks
 func (p *notebookPool) size() int {
 	p.Lock()
 	n := len(p.containerMap)
@@ -206,6 +218,7 @@ func (p *notebookPool) size() int {
 	return n
 }
 
+// addNotebook adds a tempNotebook to the containerMap, if there is room.
 func (p *notebookPool) addNotebook(t *tempNotebook) error {
 	n := p.size()
 	log.Printf("pool size: %d of %d", n+1, p.maxContainers)
@@ -221,6 +234,34 @@ func (p *notebookPool) addNotebook(t *tempNotebook) error {
 	return nil
 }
 
+// startCollector launches a goroutine that checks for expired containers at
+// interval d.  d is typically set to containerLifetime / 4.  Call
+// stopCollector to stop the reclamation.
+func (p *notebookPool) startCollector(d time.Duration) {
+	go func() {
+		ticker := time.NewTicker(d)
+		for {
+			select {
+			case <-ticker.C:
+				p.releaseContainers(false)
+			case <-p.killCollection:
+				ticker.Stop()
+				return
+			default:
+				time.Sleep(d)
+			}
+		}
+	}()
+}
+
+// stopCollector sends a message on a channel to kill the auto reclamation.
+func (p *notebookPool) stopCollector() {
+	p.killCollection <- struct{}{}
+}
+
+// releaseContainers checks for expired containers and frees them from the
+// containerMap.  It also frees the port in the portSet.  If force is true, age
+// is ignored.
 func (p *notebookPool) releaseContainers(force bool) error {
 	p.Lock()
 	defer p.Unlock()

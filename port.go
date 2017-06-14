@@ -43,6 +43,7 @@ func (pr *portRange) Acquire() (int, error) {
 	return -1, errNotebookPoolFull
 }
 
+// errPortOutOfRange indicates the port is invalid for the portRange.
 var errPortOutOfRange = errors.New("port out of range")
 
 // Drop releases a port back to the available pool.  If the requested port is
