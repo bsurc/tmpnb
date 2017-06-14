@@ -1,6 +1,7 @@
 // Copyright (c) 2017, Boise State University All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -8,9 +9,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"html/template"
-	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -24,14 +23,11 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
 )
 
 const (
-	defaultNotebook = "jupyter/minimal-notebook"
-
+	defaultNotebook   = "jupyter/minimal-notebook"
 	containerLifetime = 5 * time.Minute
 )
 
@@ -41,188 +37,13 @@ var (
 	containerMap    = map[string]*tempNotebook{}
 	portLock        sync.Mutex
 	mux             = http.NewServeMux()
-	ports           = newPortBitmap(8000, 100)
+	ports           = newPortRange(8000, 100)
 	token           string
 	imageMatch      = regexp.MustCompile(`[a-zA-Z0-9]+/[a-zA-Z0-9]+-notebook[:]{0,1}[a-zA-Z0-9]*`)
 )
 
-type portRange struct {
-	mu     sync.Mutex
-	bits   uint32
-	start  int
-	length int
-}
-
-func newPortBitmap(start, length int) *portRange {
-	return &portRange{start: start, length: length}
-}
-
-func isWebsocket(r *http.Request) bool {
-	//log.Printf("%+v", r.Header)
-	upgrade := false
-	for _, h := range r.Header["Connection"] {
-		if strings.Index(strings.ToLower(h), "upgrade") >= 0 {
-			upgrade = true
-			break
-		}
-	}
-	if !upgrade {
-		return false
-	}
-
-	for _, h := range r.Header["Upgrade"] {
-		if strings.Index(strings.ToLower(h), "websocket") >= 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// websocketProxy is @bradfitz's from:
-//
-// https://groups.google.com/forum/#!msg/golang-nuts/KBx9pDlvFOc/QC5v-uC5UOgJ
-func websocketProxy(target string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		d, err := net.Dial("tcp", target)
-		if err != nil {
-			http.Error(w, "Error contacting backend server.", 500)
-			log.Printf("Error dialing websocket backend %s: %v", target, err)
-			return
-		}
-		hj, ok := w.(http.Hijacker)
-		if !ok {
-			http.Error(w, "Not a hijacker?", 500)
-			return
-		}
-		nc, _, err := hj.Hijack()
-		if err != nil {
-			log.Printf("Hijack error: %v", err)
-			return
-		}
-		defer nc.Close()
-		defer d.Close()
-
-		err = r.Write(d)
-		if err != nil {
-			log.Printf("Error copying request to target: %v", err)
-			return
-		}
-
-		errc := make(chan error, 2)
-		cp := func(dst io.Writer, src io.Reader) {
-			_, err := io.Copy(dst, src)
-			errc <- err
-		}
-		go cp(d, nc)
-		go cp(nc, d)
-		<-errc
-	})
-}
-
-func (pr *portRange) Acquire() (int, error) {
-	pr.mu.Lock()
-	defer pr.mu.Unlock()
-	for p := uint(0); p < uint(pr.length); p++ {
-		if pr.bits&(1<<p) == 0 {
-			pr.bits |= (1 << p)
-			return int(p) + pr.start, nil
-		}
-	}
-	return -1, fmt.Errorf("port range full")
-}
-
-func (pr *portRange) Drop(p int) error {
-	pr.mu.Lock()
-	defer pr.mu.Unlock()
-	if p < pr.start || p >= pr.start+pr.length {
-		return fmt.Errorf("port out of range")
-	}
-	pr.bits &= ^(1 << uint(p-pr.start))
-	return nil
-}
-
 func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
-}
-
-type tempNotebook struct {
-	id, hash     string
-	created      time.Time
-	lastAccessed time.Time
-	port         int
-}
-
-func newTempNotebook(image string) (*tempNotebook, error) {
-	t := new(tempNotebook)
-	ctx := context.Background()
-	cli, err := client.NewEnvClient()
-	if err != nil {
-		return t, err
-	}
-
-	_, err = cli.ImagePull(ctx, image, types.ImagePullOptions{})
-	if err != nil {
-		return t, err
-	}
-
-	var buf [32]byte
-	_, err = rand.Read(buf[:])
-	if err != nil {
-		return t, err
-	}
-	hash := fmt.Sprintf("%x", buf)
-	basePath := fmt.Sprintf("--NotebookApp.base_url=%s", path.Join("/book", hash))
-
-	port, err := ports.Acquire()
-	if err != nil {
-		return t, err
-	}
-	portString := fmt.Sprintf("%d", port)
-
-	var pSet = nat.PortSet{}
-	p, err := nat.NewPort("tcp", portString)
-	pSet[p] = struct{}{}
-	containerConfig := container.Config{
-		Hostname: "0.0.0.0",
-		User:     "jovyan",
-		Cmd: []string{`jupyter`,
-			`notebook`,
-			`--no-browser`,
-			`--port`,
-			portString,
-			`--ip=0.0.0.0`,
-			basePath,
-			`--NotebookApp.port_retries=0`,
-			fmt.Sprintf(`--NotebookApp.token="%s"`, token),
-			`--NotebookApp.disable_check_xsrf=True`,
-		},
-		Env:          []string{fmt.Sprintf("CONFIGPROXY_AUTH_TOKEN=%s", token)},
-		Image:        image,
-		ExposedPorts: pSet,
-	}
-
-	hostConfig := container.HostConfig{
-		NetworkMode: "host",
-		//DNS:            []string
-		//Binds           []string      // List of volume bindings for this container
-		//NetworkMode     NetworkMode   // Network mode to use for the container
-		//PortBindings    nat.PortMap   // Port mapping between the exposed port (container) and the host
-		//AutoRemove      bool          // Automatically remove container when it exits
-	}
-
-	resp, err := cli.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, "")
-	if err != nil {
-		return t, err
-	}
-
-	if err := cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
-		return t, err
-	}
-	t = &tempNotebook{resp.ID, hash, time.Now(), time.Now(), port}
-	containerLock.Lock()
-	containerMap[hash] = t
-	containerLock.Unlock()
-	return t, nil
 }
 
 func newNotebookHandler(w http.ResponseWriter, r *http.Request) {
@@ -389,9 +210,13 @@ func main() {
 		log.Println("Shutting down server...")
 		containerLock.Lock()
 		for hash := range containerMap {
+			// TODO(kyle): this is potentially racy.  Probably change
+			// releaseContainers() to take a force option to kill/remove all
+			// containers of ours regardless of age.
 			containerMap[hash].lastAccessed = time.Unix(1, 0)
 		}
 		containerLock.Unlock()
+		// XXX: * racy * see above
 		releaseContainers()
 		os.Exit(0)
 	}()
