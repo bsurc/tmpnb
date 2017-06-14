@@ -35,6 +35,7 @@ type serverConfig struct {
 	ImageRegexp       string        `json:"image_regexp"`
 	MaxContainers     int           `json:"max_containers"`
 	HTTPRedirect      bool          `json:"http_redirect"`
+	Port              string        `json:"port"`
 	TLSCert           string        `json:"tls_cert"`
 	TLSKey            string        `json:"tls_key"`
 }
@@ -88,7 +89,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.token = tkn
 	srv.pool.token = tkn
 	srv.Server = &http.Server{
-		Addr: ":8888",
+		Addr: sc.Port,
 	}
 	srv.mux = http.NewServeMux()
 	srv.mux.HandleFunc("/", srv.listImages)
