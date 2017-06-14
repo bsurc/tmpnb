@@ -204,6 +204,7 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 	t := &tempNotebook{resp.ID, hash, time.Now(), port}
 	err = p.addNotebook(t)
 	if err != nil {
+		log.Print(err)
 		p.portSet.Drop(port)
 		return nil, err
 	}
@@ -287,6 +288,8 @@ func (p *notebookPool) releaseContainers(force bool) error {
 		if err := cli.ContainerRemove(ctx, c.id, types.ContainerRemoveOptions{Force: true}); err != nil {
 			log.Print(err)
 		}
+		// TODO(kyle): release the handler from the ServeMux, may have to add
+		// fx-ality for that.
 		p.portSet.Drop(c.port)
 		delete(p.containerMap, c.hash)
 	}
