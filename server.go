@@ -29,10 +29,14 @@ func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
 
+// TODO(kyle): embed or add to notebookServer?
 type serverConfig struct {
 	ContainerLifetime time.Duration `json:"container_lifetime"`
 	ImageRegexp       string        `json:"image_regexp"`
 	MaxContainers     int           `json:"max_containers"`
+	HTTPRedirect      bool          `json:"http_redirect"`
+	TLSCert           string        `json:"tls_cert"`
+	TLSKey            string        `json:"tls_key"`
 }
 
 var defaultConfig = serverConfig{
@@ -50,6 +54,10 @@ type notebookServer struct {
 	mux *http.ServeMux
 	// embed a server
 	*http.Server
+
+	httpRedirect bool
+	tlsCert      string
+	tlsKey       string
 }
 
 func readConfig(r io.Reader) (serverConfig, error) {
@@ -87,6 +95,9 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.HandleFunc("/new", srv.newNotebookHandler)
 	srv.Handler = srv.mux
 
+	srv.tlsCert = sc.TLSCert
+	srv.tlsKey = sc.TLSKey
+
 	quit := make(chan os.Signal)
 	signal.Notify(quit, os.Interrupt)
 	go func() {
@@ -120,7 +131,15 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	tmpnb, err := srv.pool.newNotebook(imageName, false)
+	pull := false
+	if s := r.FormValue("pull"); s != "" {
+		switch s {
+		case "true", "1", "yes":
+			pull = true
+		}
+	}
+
+	tmpnb, err := srv.pool.newNotebook(imageName, pull)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		log.Print(err)
@@ -195,10 +214,38 @@ func (srv *notebookServer) listImages(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (srv *notebookServer) Start() {
+	if srv.tlsCert != "" && srv.tlsKey != "" {
+		if srv.httpRedirect {
+			httpServer := http.Server{}
+			httpMux := http.NewServeMux()
+			httpMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				u := *r.URL
+				u.Scheme = "https"
+				u.Host = r.Host
+				r.ParseForm()
+				u.RawPath = r.Form.Encode()
+				http.Redirect(w, r, u.String(), http.StatusPermanentRedirect)
+			})
+			httpServer.Handler = httpMux
+			go func() {
+				log.Fatal(httpServer.ListenAndServe())
+			}()
+		}
+		log.Fatal(srv.ListenAndServeTLS(srv.tlsCert, srv.tlsKey))
+	} else {
+		log.Fatal(srv.ListenAndServe())
+	}
+}
+
 func main() {
-	srv, err := newNotebookServer("")
+	cfg := ""
+	if len(os.Args) > 1 {
+		cfg = os.Args[1]
+	}
+	srv, err := newNotebookServer(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Fatal(srv.ListenAndServe())
+	srv.Start()
 }
