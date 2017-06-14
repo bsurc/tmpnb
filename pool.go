@@ -26,6 +26,9 @@ const (
 	// example: jupyter/minimal-notebook
 	jupyterNotebookImageMatch = `[a-zA-Z0-9]+/[a-zA-Z0-9]+-notebook[:]{0,1}[a-zA-Z0-9]*`
 
+	// allImageMatch applies no filter
+	allImageMatch = `.*`
+
 	// defaultContainerLifetime is used if a lifetime is not provided
 	defaultContainerLifetime = time.Minute * 10
 

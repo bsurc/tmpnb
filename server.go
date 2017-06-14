@@ -5,8 +5,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -27,6 +29,18 @@ func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
 
+type serverConfig struct {
+	ContainerLifetime time.Duration `json:"container_lifetime"`
+	ImageRegexp       string        `json:"image_regexp"`
+	MaxContainers     int           `json:"max_containers"`
+}
+
+var defaultConfig = serverConfig{
+	ContainerLifetime: defaultContainerLifetime,
+	ImageRegexp:       allImageMatch,
+	MaxContainers:     defaultMaxContainers,
+}
+
 type notebookServer struct {
 	// pool manages the containers
 	pool *notebookPool
@@ -38,9 +52,25 @@ type notebookServer struct {
 	*http.Server
 }
 
+func readConfig(r io.Reader) (serverConfig, error) {
+	sc := defaultConfig
+	err := json.NewDecoder(r).Decode(&sc)
+	return sc, err
+}
+
 func newNotebookServer(config string) (*notebookServer, error) {
-	_ = config
-	p, err := newNotebookPool(`.*`, 0, time.Duration(0))
+	sc := defaultConfig
+	if config != "" {
+		fin, err := os.Open(config)
+		if err != nil {
+			return nil, err
+		}
+		sc, err = readConfig(fin)
+		if err != nil {
+			return nil, err
+		}
+	}
+	p, err := newNotebookPool(sc.ImageRegexp, sc.MaxContainers, sc.ContainerLifetime)
 	if err != nil {
 		return nil, err
 	}
