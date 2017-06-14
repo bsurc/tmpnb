@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log"
 	"path"
@@ -74,6 +75,8 @@ type notebookPool struct {
 	// token is the security token for auto-auth
 	token string
 }
+
+var errNotebookPoolFull = errors.New("container pool hit max size limit")
 
 func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Duration) (*notebookPool, error) {
 	if imageRegexp == "" {
@@ -178,17 +181,44 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 
 	resp, err := cli.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, "")
 	if err != nil {
+		p.portSet.Drop(port)
 		return nil, err
 	}
 
 	if err := cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
+		p.portSet.Drop(port)
 		return nil, err
 	}
+	log.Printf("created container: %s", resp.ID)
 	t := &tempNotebook{resp.ID, hash, time.Now(), port}
-	p.Lock()
-	p.containerMap[hash] = t
-	p.Unlock()
+	err = p.addNotebook(t)
+	if err != nil {
+		p.portSet.Drop(port)
+		return nil, err
+	}
 	return t, nil
+}
+
+func (p *notebookPool) size() int {
+	p.Lock()
+	n := len(p.containerMap)
+	p.Unlock()
+	return n
+}
+
+func (p *notebookPool) addNotebook(t *tempNotebook) error {
+	n := p.size()
+	log.Printf("pool size: %d of %d", n+1, p.maxContainers)
+	if p.size()+1 > p.maxContainers {
+		p.releaseContainers(false)
+	}
+	if p.size()+1 > p.maxContainers {
+		return errNotebookPoolFull
+	}
+	p.Lock()
+	p.containerMap[t.hash] = t
+	p.Unlock()
+	return nil
 }
 
 func (p *notebookPool) releaseContainers(force bool) error {

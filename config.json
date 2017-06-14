@@ -3,6 +3,7 @@
   "image_regexp": ".*",
   "max_containers": 100,
   "http_redirect": false,
+  "port": ":8888",
   "tls_cert": "",
   "tls_key": ""
 }

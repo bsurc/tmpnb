@@ -29,8 +29,6 @@ func newPortRange(start, length int) *portRange {
 	return &portRange{start: start, length: length}
 }
 
-var errPortRangeFull = errors.New("port range full")
-
 // Acquire finds an open port and returns it.  If no port is available
 // errPortRangeFull is returned.
 func (pr *portRange) Acquire() (int, error) {
@@ -42,7 +40,7 @@ func (pr *portRange) Acquire() (int, error) {
 			return int(p) + pr.start, nil
 		}
 	}
-	return -1, errPortRangeFull
+	return -1, errNotebookPoolFull
 }
 
 var errPortOutOfRange = errors.New("port out of range")
