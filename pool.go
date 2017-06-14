@@ -298,7 +298,7 @@ func (p *notebookPool) releaseContainers(force bool) error {
 		// This isn't very elegant, but we couldn't delete the pattern from the mux
 		// before, but now we can with the vendored/updated copy in mux.go.  We add
 		// a trailing slice when we register the path, so we must add it here too.
-		p.deregisterMux <- path.Join("/book", c.hash+"/")
+		p.deregisterMux <- path.Join("/book", c.hash) + "/"
 	}
 	return nil
 }

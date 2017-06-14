@@ -136,7 +136,6 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		for {
 			select {
 			case p := <-srv.pool.deregisterMux:
-				p += "/"
 				log.Printf("deregistering %s from mux", p)
 				srv.mux.Deregister(p)
 			}
