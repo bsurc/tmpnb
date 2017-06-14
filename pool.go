@@ -154,6 +154,8 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 		return nil, err
 	}
 
+	// TODO(kyle): possibly provide tag support
+
 	if pull {
 		_, err = cli.ImagePull(ctx, image, types.ImagePullOptions{})
 		if err != nil {

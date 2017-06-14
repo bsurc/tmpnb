@@ -220,6 +220,7 @@ func (mux *ServeMux) HandleFunc(pattern string, handler func(http.ResponseWriter
 	mux.Handle(pattern, http.HandlerFunc(handler))
 }
 
+// Deregister removes the pattern from the mux.
 func (mux *ServeMux) Deregister(pattern string) {
 	mux.mu.Lock()
 	delete(mux.m, pattern)

@@ -33,7 +33,7 @@ func TestPortRange(t *testing.T) {
 	}
 
 	pr.Drop(8000)
-	mask -= 1
+	mask--
 	if pr.bits != mask {
 		t.Errorf("cleared wrong bit, exp: %s, got: %s", printBits(mask), printBits(pr.bits))
 	}
