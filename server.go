@@ -98,6 +98,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 	srv.tlsCert = sc.TLSCert
 	srv.tlsKey = sc.TLSKey
+	srv.httpRedirect = sc.HTTPRedirect
 
 	quit := make(chan os.Signal)
 	signal.Notify(quit, os.Interrupt)
