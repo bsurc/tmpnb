@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httputil"
+	"net/http/pprof"
 	"net/url"
 	"os"
 	"os/signal"
@@ -37,6 +38,7 @@ func init() {
 // TODO(kyle): embed or add to notebookServer?
 type serverConfig struct {
 	ContainerLifetime time.Duration `json:"container_lifetime"`
+	EnablePProf       bool          `json:"enable_pprof"`
 	ImageRegexp       string        `json:"image_regexp"`
 	MaxContainers     int           `json:"max_containers"`
 	HTTPRedirect      bool          `json:"http_redirect"`
@@ -106,6 +108,12 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.HandleFunc("/", srv.listImages)
 	srv.mux.HandleFunc("/new", srv.newNotebookHandler)
 	srv.mux.HandleFunc("/status", srv.statusHandler)
+	if sc.EnablePProf {
+		srv.mux.Handle("/debug/pprof/", http.HandlerFunc(pprof.Index))
+		srv.mux.Handle("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
+		srv.mux.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
+		srv.mux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
+	}
 	srv.Handler = srv.mux
 
 	srv.tlsCert = sc.TLSCert

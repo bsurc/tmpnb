@@ -1,5 +1,6 @@
 {
   "container_lifetime": 600000000000,
+  "enable_pprof": true,
   "image_regexp": ".*",
   "max_containers": 100,
   "http_redirect": false,
