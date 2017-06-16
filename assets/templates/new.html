@@ -17,19 +17,20 @@ var respCode = 0;
 xhr.onreadystatechange = function () {
  respCode = xhr.status;
 }
-// max time of 10 * 500 = 5000ms
 for(i = 0; i < 10 && respCode != 200; i++) {
  if(respCode === 200) {
-  console.log("found container.");
+  console.log("found container:" + respCode);
   document.getElementById("status").innerHTML = "Container built!, Redirecting...";
  }
- console.log("waiting for container...");
+ console.log("waiting for container...", respCode);
  var n = i % 3;
  var ellipsis = ".".repeat(i % 3)
  document.getElementById("status").innerHTML = "Building your container" + ellipsis;
- sleep(500).then(() => {});
+ sleep(500).then(()=> { respCode = xhr.status;console.log("sleeping...")});
 }
-window.location = "{{.Path}}?token={{.Token}}";
+var link = "<a href={{.Path}}?token={{.Token}}>Click here to launch your container</a>";
+console.log(respCode, i);
+document.getElementById("status").innerHTML = link;
 </script>
 {{template "footer"}}
 {{end}}
