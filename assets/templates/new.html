@@ -10,7 +10,7 @@ function sleep(ms) {
 var containerID = {{.ID}};
 xhr = new XMLHttpRequest();
 xhr.open("GET", url, true);
-var url = "/status?"+containerID;
+var url = "/status?"+containerID+"&ping;
 var i = 0;
 var respCode = 0;
 xhr.onreadystatechange = function () {
@@ -28,7 +28,7 @@ for(i = 0; i < 10 && respCode != 200; i++) {
  document.getElementById("status").innerHTML = "Building your container" + ellipsis;
  sleep(500).then(() => {});
 }
-window.location = "{{.Path}}?token={{.Token}}&ping";
+window.location = "{{.Path}}?token={{.Token}}";
 </script>
 {{template "footer"}}
 {{end}}
