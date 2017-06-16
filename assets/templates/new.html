@@ -20,13 +20,14 @@ xhr.onreadystatechange = function () {
 for(i = 0; i < 10 && respCode != 200; i++) {
  if(respCode === 200) {
   console.log("found container.");
+  // one more sleep for good measure.
+  sleep(500).then(() => {});
  }
  console.log("waiting for container...");
  var n = i % 3;
  var ellipsis = ".".repeat(i % 3)
  document.getElementById("status").innerHTML = "Building your container" + ellipsis;
- sleep(500).then(() => {
- });
+ sleep(500).then(() => {});
 }
 window.location = "{{.Path}}?token={{.Token}}";
 </script>
