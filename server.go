@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -31,12 +32,20 @@ const (
 	defaultNotebook = "jupyter/minimal-notebook"
 )
 
+var templateFiles = []string{
+	"about.html",
+	"footer.html",
+	"header.html",
+	"list.html",
+}
+
 func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
 
 // TODO(kyle): embed or add to notebookServer?
 type serverConfig struct {
+	AssetPath         string        `json:"asset_path"`
 	ContainerLifetime time.Duration `json:"container_lifetime"`
 	EnablePProf       bool          `json:"enable_pprof"`
 	ImageRegexp       string        `json:"image_regexp"`
@@ -69,6 +78,8 @@ type notebookServer struct {
 	tlsCert string
 	// TLS private key path
 	tlsKey string
+	// html templates
+	templates *template.Template
 }
 
 // readConfig reads json config from r
@@ -106,8 +117,17 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	}
 	//srv.mux = http.NewServeMux()
 	srv.mux = new(ServeMux)
+	srv.mux.HandleFunc("/about", func(w http.ResponseWriter, r *http.Request) {
+		err := srv.templates.ExecuteTemplate(w, "about", nil)
+		if err != nil {
+			log.Print(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
+
 	srv.mux.HandleFunc("/list", srv.listImages)
 	srv.mux.HandleFunc("/new", srv.newNotebookHandler)
+	srv.mux.Handle("/static/", http.FileServer(http.Dir(sc.AssetPath)))
 	srv.mux.HandleFunc("/status", srv.statusHandler)
 	if sc.EnablePProf {
 		srv.mux.Handle("/debug/pprof/", http.HandlerFunc(pprof.Index))
@@ -115,11 +135,19 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		srv.mux.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
 		srv.mux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
 	}
+
 	srv.Handler = srv.mux
 
 	srv.tlsCert = sc.TLSCert
 	srv.tlsKey = sc.TLSKey
 	srv.httpRedirect = sc.HTTPRedirect
+
+	var templatePaths []string
+	for _, t := range templateFiles {
+		templatePaths = append(templatePaths, filepath.Join(sc.AssetPath, "templates", t))
+	}
+
+	srv.templates = template.Must(template.New("").ParseFiles(templatePaths...))
 
 	quit := make(chan os.Signal)
 	signal.Notify(quit, os.Interrupt)
@@ -282,25 +310,6 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 
 // listImages lists html links to the different docker images.
 func (srv *notebookServer) listImages(w http.ResponseWriter, r *http.Request) {
-	page := `
-  <!DOCTYPE HTML>
-  <html>
-  <div>
-  <h1>Boise State University Code Lab</h1>
-  </div>
-  <ul>
-    {{range . -}}
-      <li><a href="new?image={{.}}">{{.}}</a></li>
-    {{end -}}
-  </ul>
-  </html>`
-
-	tmpl, err := template.New("").Parse(page)
-	if err != nil {
-		log.Print(err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	images := []string{}
 	for k := range srv.pool.availableImages {
 		images = append(images, k)
@@ -308,7 +317,7 @@ func (srv *notebookServer) listImages(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(images, func(i, j int) bool {
 		return images[i] < images[j]
 	})
-	err = tmpl.Execute(w, images)
+	err := srv.templates.ExecuteTemplate(w, "list", images)
 	if err != nil {
 		log.Print(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)

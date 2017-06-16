@@ -1,0 +1,9 @@
+{{define "list"}}
+{{template "header"}}
+<ul>
+  {{range . -}}
+    <li><a href="new?image={{.}}">{{.}}</a></li>
+  {{end -}}
+</ul>
+{{template "footer"}}
+{{end}}
