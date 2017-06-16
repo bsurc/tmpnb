@@ -17,6 +17,8 @@ xhr.onreadystatechange = function () {
   console.log("container built");
   var link = "<a href={{.Path}}?token={{.Token}}>Click here to launch your container</a>";
   document.getElementById("status").innerHTML = link;
+ } else {
+  xhr.send(url);
  }
 }
 setTimeout(xhr.onreadystatechange, 5000);
