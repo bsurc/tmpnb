@@ -4,33 +4,27 @@
  <p id="status">Building your container...</p>
 </div>
 <script>
-function sleep(ms) {
- return new Promise((resolve) => setTimeout(resolve, ms));
-}
 var containerID = {{.ID}};
 xhr = new XMLHttpRequest();
-xhr.open("GET", url, true);
 //var url = "/status?"+containerID+"&ping";
 var url = "/status?"+containerID;
+xhr.open("GET", url, true);
 var i = 0;
 var respCode = 0;
+xhr.send(url);
 xhr.onreadystatechange = function () {
- respCode = xhr.status;
-}
-for(i = 0; i < 10 && respCode != 200; i++) {
- if(respCode === 200) {
-  console.log("found container:" + respCode);
-  document.getElementById("status").innerHTML = "Container built!, Redirecting...";
+ if(xhr.status === 200) {
+  console.log("container built");
+  var link = "<a href={{.Path}}?token={{.Token}}>Click here to launch your container</a>";
+  document.getElementById("status").innerHTML = link;
  }
- console.log("waiting for container...", respCode);
- var n = i % 3;
- var ellipsis = ".".repeat(i % 3)
- document.getElementById("status").innerHTML = "Building your container" + ellipsis;
- sleep(500).then(()=> { respCode = xhr.status;console.log("sleeping...")});
 }
-var link = "<a href={{.Path}}?token={{.Token}}>Click here to launch your container</a>";
-console.log(respCode, i);
-document.getElementById("status").innerHTML = link;
+setTimeout(xhr.onreadystatechange, 5000);
+if(xhr.status != 200) {
+ var link = "<a href={{.Path}}?token={{.Token}}>Container status timed out, click here to attempt launch your container</a>";
+ document.getElementById("status").innerHTML = link;
+}
+
 </script>
 {{template "footer"}}
 {{end}}
