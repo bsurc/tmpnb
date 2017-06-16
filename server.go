@@ -202,36 +202,38 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 	}
 	state := containers[0].State
 	log.Printf("container %s state: %s", id, state)
-	if state == "running" {
+	_, ping := r.Form["ping"]
+	if state != "running" {
+		w.WriteHeader(http.StatusNotFound)
+	} else if !ping {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	if _, ok := r.Form["ping"]; ok {
-		var tmpnb *tempNotebook
-		for _, v := range srv.pool.containerMap {
-			if v.id == id {
-				tmpnb = v
-				break
-			}
+	// ping && running
+	var tmpnb *tempNotebook
+	for _, v := range srv.pool.containerMap {
+		if v.id == id {
+			tmpnb = v
+			break
 		}
-		if tmpnb == nil {
-			log.Printf("couldn't find container in containerMap: %s", id)
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		pingURL := url.URL{
-			Host: fmt.Sprintf(":%d", tmpnb.port),
-			Path: path.Join("/book", tmpnb.hash),
-		}
-		resp, err := http.Get(pingURL.String())
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		resp.Body.Close()
-		w.WriteHeader(resp.StatusCode)
+	}
+	if tmpnb == nil {
+		log.Printf("couldn't find container in containerMap: %s", id)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	pingURL := url.URL{
+		Host: fmt.Sprintf(":%d", tmpnb.port),
+		Path: path.Join("/book", tmpnb.hash),
+	}
+	resp, err := http.Get(pingURL.String())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	resp.Body.Close()
+	w.WriteHeader(resp.StatusCode)
+	return
 	w.WriteHeader(http.StatusNotFound)
 }
 
