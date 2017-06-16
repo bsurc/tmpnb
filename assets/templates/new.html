@@ -20,11 +20,6 @@ xhr.onreadystatechange = function () {
  }
 }
 setTimeout(xhr.onreadystatechange, 5000);
-if(xhr.status != 200) {
- var link = "<a href={{.Path}}?token={{.Token}}>Container status timed out, click here to attempt launch your container</a>";
- document.getElementById("status").innerHTML = link;
-}
-
 </script>
 {{template "footer"}}
 {{end}}
