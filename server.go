@@ -32,13 +32,6 @@ const (
 	defaultNotebook = "jupyter/minimal-notebook"
 )
 
-var templateFiles = []string{
-	"about.html",
-	"footer.html",
-	"header.html",
-	"list.html",
-}
-
 func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
@@ -142,9 +135,14 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.tlsKey = sc.TLSKey
 	srv.httpRedirect = sc.HTTPRedirect
 
+	templateFiles, err := filepath.Glob(filepath.Join(sc.AssetPath, "templates", "*.html"))
+	if err != nil {
+		return nil, err
+	}
 	var templatePaths []string
 	for _, t := range templateFiles {
-		templatePaths = append(templatePaths, filepath.Join(sc.AssetPath, "templates", t))
+		log.Printf("loading template: %s", t)
+		templatePaths = append(templatePaths, t)
 	}
 
 	srv.templates = template.Must(template.New("").ParseFiles(templatePaths...))
@@ -303,9 +301,18 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	q := url.Values{}
 	q.Set("token", srv.token)
 	handlerURL.RawQuery = q.Encode()
-	fmt.Fprintln(w, "<html>")
-	fmt.Fprintf(w, `<a href="%s">wait a tick, then click</a>`, handlerURL.String())
-	fmt.Fprintln(w, "</html>")
+	srv.templates.ExecuteTemplate(w, "new", struct {
+		ID    string
+		Path  string
+		Token string
+	}{
+		ID:    tmpnb.id,
+		Path:  handlerURL.Path,
+		Token: srv.token,
+	})
+	//fmt.Fprintln(w, "<html>")
+	//fmt.Fprintf(w, `<a href="%s">wait a tick, then click</a>`, handlerURL.String())
+	//fmt.Fprintln(w, "</html>")
 }
 
 // listImages lists html links to the different docker images.
