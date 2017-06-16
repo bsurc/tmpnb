@@ -262,10 +262,15 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		}
 		proxy.ServeHTTP(w, r)
 	})
+
 	// FIXME(kyle): check for valid connection on the tmpnb port
 	time.Sleep(time.Second)
 	handlerURL := url.URL{}
 	handlerURL.Path = handlerPath
+	forwardPath := r.FormValue("path")
+	if forwardPath != "" {
+		handlerURL.Path = path.Join(handlerPath, forwardPath)
+	}
 	q := url.Values{}
 	q.Set("token", srv.token)
 	handlerURL.RawQuery = q.Encode()
