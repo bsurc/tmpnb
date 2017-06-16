@@ -6,22 +6,20 @@
 <script>
 var containerID = {{.ID}};
 xhr = new XMLHttpRequest();
-//var url = "/status?"+containerID+"&ping";
-var url = "/status?"+containerID;
+//var url = "/status?ping&container="+containerID;
+var url = "/status?ping=yes&container="+containerID;
 xhr.open("GET", url, true);
-var i = 0;
-var respCode = 0;
 xhr.send(url);
 xhr.onreadystatechange = function () {
- if(xhr.status === 200) {
+ if(xhr.readyState === 4 && xhr.status === 200) {
   console.log("container built");
   var link = "<a href={{.Path}}?token={{.Token}}>Click here to launch your container</a>";
   document.getElementById("status").innerHTML = link;
  } else {
-  xhr.send(url);
+  console.log(xhr.status);
  }
 }
-setTimeout(xhr.onreadystatechange, 5000);
+setTimeout(xhr.onreadystatechange, 20000);
 </script>
 {{template "footer"}}
 {{end}}

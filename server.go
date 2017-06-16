@@ -20,6 +20,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -224,19 +225,31 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	pingURL := url.URL{
-		Host: fmt.Sprintf(":%d", tmpnb.port),
-		Path: path.Join("/book", tmpnb.hash),
+		Scheme: "http",
+		Host:   strings.Split(r.Host, ":")[0] + fmt.Sprintf(":%d", tmpnb.port),
+		Path:   path.Join("/book", tmpnb.hash) + "/",
 	}
-	resp, err := http.Get(pingURL.String())
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+	log.Printf("ping target: %s", pingURL.String())
+	var resp *http.Response
+	status := http.StatusNotFound
+	for i := 0; i < 10; i++ {
+		resp, err = http.Get(pingURL.String())
+		if err != nil {
+			log.Printf("ping failed: %s (attempt %d)", err, i)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		resp.Body.Close()
+		status = resp.StatusCode
+		switch status {
+		case http.StatusOK, http.StatusFound:
+			log.Println("container pinged successfully")
+			status = http.StatusOK
+			goto found
+		}
 	}
-	resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		time.Sleep(time.Millisecond * 500)
-	}
-	w.WriteHeader(resp.StatusCode)
+found:
+	w.WriteHeader(status)
 }
 
 func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Request) {
