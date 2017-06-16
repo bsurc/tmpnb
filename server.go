@@ -270,6 +270,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	forwardPath := r.FormValue("path")
 	if forwardPath != "" {
 		handlerURL.Path = path.Join(handlerPath, forwardPath)
+		log.Printf("forwarding path: %s", handlerURL.Path)
 	}
 	q := url.Values{}
 	q.Set("token", srv.token)
