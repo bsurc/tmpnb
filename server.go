@@ -206,6 +206,7 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 	if state != "running" {
 		w.WriteHeader(http.StatusNotFound)
 	} else if !ping {
+		time.Sleep(time.Millisecond * 500)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -232,9 +233,10 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		time.Sleep(time.Millisecond * 500)
+	}
 	w.WriteHeader(resp.StatusCode)
-	return
-	w.WriteHeader(http.StatusNotFound)
 }
 
 func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Request) {

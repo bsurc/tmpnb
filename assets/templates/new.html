@@ -10,7 +10,8 @@ function sleep(ms) {
 var containerID = {{.ID}};
 xhr = new XMLHttpRequest();
 xhr.open("GET", url, true);
-var url = "/status?"+containerID+"&ping";
+//var url = "/status?"+containerID+"&ping";
+var url = "/status?"+containerID;
 var i = 0;
 var respCode = 0;
 xhr.onreadystatechange = function () {
