@@ -381,6 +381,9 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	for _, nb := range nbs {
 		m[nb.imageName]++
 	}
+	sort.Slice(nbs, func(i, j int) bool {
+		return nbs[i].lastAccessed.Before(nbs[j].lastAccessed)
+	})
 	tw := tabwriter.NewWriter(w, 0, 8, 1, '\t', 0)
 	for k, v := range m {
 		fmt.Fprintf(tw, "%s\t%d\n", k, v)
