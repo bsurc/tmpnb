@@ -374,13 +374,6 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 }
 
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
-	/*
-		err := srv.templates.ExecuteTemplate(w, "header", nil)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	*/
 	nbs := srv.pool.activeNotebooks()
 	fmt.Fprintf(w, "Notebooks in use: %d\n", len(nbs))
 	fmt.Fprintf(w, "Containers by image:\n")
@@ -395,8 +388,9 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	tw.Flush()
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "All Containers:\n")
+	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\n")
 	for _, nb := range nbs {
-		fmt.Fprintf(tw, "%s\t%s\n", nb.imageName, nb.lastAccessed)
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", nb.hash[:8], nb.imageName, nb.lastAccessed)
 	}
 	tw.Flush()
 }
