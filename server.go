@@ -381,16 +381,17 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	for _, nb := range nbs {
 		m[nb.imageName]++
 	}
-	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
+	tw := tabwriter.NewWriter(w, 0, 8, 1, '\t', 0)
 	for k, v := range m {
 		fmt.Fprintf(tw, "%s\t%d\n", k, v)
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "All Containers:\n")
-	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\n")
+	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\tExpires in\n")
 	for _, nb := range nbs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", nb.hash[:8], nb.imageName, nb.lastAccessed)
+		d := time.Until(nb.lastAccessed.Add(srv.pool.containerLifetime))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", nb.hash[:8], nb.imageName, nb.lastAccessed, d)
 	}
 	tw.Flush()
 }
