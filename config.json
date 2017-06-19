@@ -3,7 +3,7 @@
   "container_lifetime": 1000000000000,
   "enable_pprof": true,
   "image_regexp": ".*",
-  "logfile": "tmpnb.log",
+  "logfile": "",
   "max_containers": 100,
   "http_redirect": false,
   "port": ":8888",

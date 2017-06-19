@@ -122,23 +122,16 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	}
 	//srv.mux = http.NewServeMux()
 	srv.mux = new(ServeMux)
-	srv.mux.HandleFunc("/about", func(w http.ResponseWriter, r *http.Request) {
-		err := srv.templates.ExecuteTemplate(w, "about", nil)
-		if err != nil {
-			log.Print(err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-	})
-
-	srv.mux.HandleFunc("/list", srv.listImages)
-	srv.mux.HandleFunc("/new", srv.newNotebookHandler)
-	srv.mux.Handle("/static/", http.FileServer(http.Dir(sc.AssetPath)))
-	srv.mux.HandleFunc("/status", srv.statusHandler)
+	srv.mux.Handle("/about", accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
+	srv.mux.Handle("/list", accessLogHandler(http.HandlerFunc((srv.listImagesHandler))))
+	srv.mux.Handle("/new", accessLogHandler(http.HandlerFunc((srv.newNotebookHandler))))
+	srv.mux.Handle("/static/", accessLogHandler((http.FileServer(http.Dir(sc.AssetPath)))))
+	srv.mux.Handle("/status", accessLogHandler(http.HandlerFunc((srv.statusHandler))))
 	if sc.EnablePProf {
-		srv.mux.Handle("/debug/pprof/", http.HandlerFunc(pprof.Index))
-		srv.mux.Handle("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
-		srv.mux.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
-		srv.mux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
+		srv.mux.Handle("/debug/pprof/", accessLogHandler(http.HandlerFunc((pprof.Index))))
+		srv.mux.Handle("/debug/pprof/cmdline", accessLogHandler(http.HandlerFunc((pprof.Cmdline))))
+		srv.mux.Handle("/debug/pprof/profile", accessLogHandler(http.HandlerFunc((pprof.Profile))))
+		srv.mux.Handle("/debug/pprof/symbol", accessLogHandler(http.HandlerFunc((pprof.Symbol))))
 	}
 
 	srv.Handler = srv.mux
@@ -186,6 +179,14 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		}
 	}()
 	return srv, nil
+}
+
+func accessLogHandler(h http.Handler) http.Handler {
+	f := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
+		h.ServeHTTP(w, r)
+	}
+	return http.HandlerFunc(f)
 }
 
 // statusHandler checks the status of a single container, returning 200 if it
@@ -311,7 +312,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	}
 	handlerPath := path.Join("/book", tmpnb.hash) + "/"
 	log.Printf("handler: %s", handlerPath)
-	srv.mux.HandleFunc(handlerPath, func(w http.ResponseWriter, r *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
 		tmpnb.lastAccessed = time.Now()
 		log.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		if isWebsocket(r) {
@@ -321,10 +322,9 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			return
 		}
 		proxy.ServeHTTP(w, r)
-	})
+	}
+	srv.mux.HandleFunc(handlerPath, handler)
 
-	// FIXME(kyle): check for valid connection on the tmpnb port
-	time.Sleep(time.Second)
 	handlerURL := url.URL{}
 	handlerURL.Path = handlerPath
 	forwardPath := r.FormValue("path")
@@ -344,13 +344,19 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		Path:  handlerURL.Path,
 		Token: srv.token,
 	})
-	//fmt.Fprintln(w, "<html>")
-	//fmt.Fprintf(w, `<a href="%s">wait a tick, then click</a>`, handlerURL.String())
-	//fmt.Fprintln(w, "</html>")
 }
 
-// listImages lists html links to the different docker images.
-func (srv *notebookServer) listImages(w http.ResponseWriter, r *http.Request) {
+// aboutHandler serves the about text directly.
+func (srv *notebookServer) aboutHandler(w http.ResponseWriter, r *http.Request) {
+	err := srv.templates.ExecuteTemplate(w, "about", nil)
+	if err != nil {
+		log.Print(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// listImagesHandler lists html links to the different docker images.
+func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Request) {
 	images := []string{}
 	for k := range srv.pool.availableImages {
 		images = append(images, k)
