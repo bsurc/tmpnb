@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -123,15 +124,16 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	//srv.mux = http.NewServeMux()
 	srv.mux = new(ServeMux)
 	srv.mux.Handle("/about", accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
-	srv.mux.Handle("/list", accessLogHandler(http.HandlerFunc((srv.listImagesHandler))))
-	srv.mux.Handle("/new", accessLogHandler(http.HandlerFunc((srv.newNotebookHandler))))
-	srv.mux.Handle("/static/", accessLogHandler((http.FileServer(http.Dir(sc.AssetPath)))))
-	srv.mux.Handle("/status", accessLogHandler(http.HandlerFunc((srv.statusHandler))))
+	srv.mux.Handle("/list", accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
+	srv.mux.Handle("/new", accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
+	srv.mux.Handle("/static/", accessLogHandler(http.FileServer(http.Dir(sc.AssetPath))))
+	srv.mux.Handle("/stats", accessLogHandler(http.HandlerFunc(srv.statsHandler)))
+	srv.mux.Handle("/status", accessLogHandler(http.HandlerFunc(srv.statusHandler)))
 	if sc.EnablePProf {
-		srv.mux.Handle("/debug/pprof/", accessLogHandler(http.HandlerFunc((pprof.Index))))
-		srv.mux.Handle("/debug/pprof/cmdline", accessLogHandler(http.HandlerFunc((pprof.Cmdline))))
-		srv.mux.Handle("/debug/pprof/profile", accessLogHandler(http.HandlerFunc((pprof.Profile))))
-		srv.mux.Handle("/debug/pprof/symbol", accessLogHandler(http.HandlerFunc((pprof.Symbol))))
+		srv.mux.Handle("/debug/pprof/", accessLogHandler(http.HandlerFunc(pprof.Index)))
+		srv.mux.Handle("/debug/pprof/cmdline", accessLogHandler(http.HandlerFunc(pprof.Cmdline)))
+		srv.mux.Handle("/debug/pprof/profile", accessLogHandler(http.HandlerFunc(pprof.Profile)))
+		srv.mux.Handle("/debug/pprof/symbol", accessLogHandler(http.HandlerFunc(pprof.Symbol)))
 	}
 
 	srv.Handler = srv.mux
@@ -369,6 +371,34 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 		log.Print(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
+	/*
+		err := srv.templates.ExecuteTemplate(w, "header", nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	*/
+	nbs := srv.pool.activeNotebooks()
+	fmt.Fprintf(w, "Notebooks in use: %d\n", len(nbs))
+	fmt.Fprintf(w, "Containers by image:\n")
+	m := map[string]int{}
+	for _, nb := range nbs {
+		m[nb.imageName]++
+	}
+	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
+	for k, v := range m {
+		fmt.Fprintf(tw, "%s\t%d\n", k, v)
+	}
+	tw.Flush()
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "All Containers:\n")
+	for _, nb := range nbs {
+		fmt.Fprintf(tw, "%s\t%s\n", nb.imageName, nb.lastAccessed)
+	}
+	tw.Flush()
 }
 
 // Start starts the http/s listener.

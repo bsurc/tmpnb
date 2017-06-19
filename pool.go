@@ -43,6 +43,8 @@ type tempNotebook struct {
 	id string
 	// hash is  a random generated hash that is used in the path of the server.
 	hash string
+	// imageName is the name of the image used to start the container
+	imageName string
 	// lastAccessed is when the container was used last.
 	lastAccessed time.Time
 	// port is the passthrough port for the reverse proxy.
@@ -208,7 +210,7 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 		return nil, err
 	}
 	log.Printf("created container: %s", resp.ID)
-	t := &tempNotebook{resp.ID, hash, time.Now(), port}
+	t := &tempNotebook{resp.ID, hash, image, time.Now(), port}
 	err = p.addNotebook(t)
 	if err != nil {
 		log.Print(err)
@@ -240,6 +242,20 @@ func (p *notebookPool) addNotebook(t *tempNotebook) error {
 	p.containerMap[t.hash] = t
 	p.Unlock()
 	return nil
+}
+
+// activeNotebooks fetchs copies of the tempNotebooks and returns them as a
+// slice.
+func (p *notebookPool) activeNotebooks() []tempNotebook {
+	nbs := make([]tempNotebook, p.size())
+	p.Lock()
+	i := 0
+	for _, nb := range p.containerMap {
+		nbs[i] = *nb
+		i++
+	}
+	p.Unlock()
+	return nbs
 }
 
 // startCollector launches a goroutine that checks for expired containers at
