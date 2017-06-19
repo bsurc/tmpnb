@@ -45,6 +45,7 @@ type serverConfig struct {
 	ImageRegexp       string        `json:"image_regexp"`
 	MaxContainers     int           `json:"max_containers"`
 	HTTPRedirect      bool          `json:"http_redirect"`
+	Logfile           string        `json:"logfile"`
 	Port              string        `json:"port"`
 	TLSCert           string        `json:"tls_cert"`
 	TLSKey            string        `json:"tls_key"`
@@ -74,6 +75,8 @@ type notebookServer struct {
 	tlsKey string
 	// html templates
 	templates *template.Template
+	// logging io.Writer
+	logWriter io.Writer
 }
 
 // readConfig reads json config from r
@@ -96,6 +99,13 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+	if sc.Logfile != "" {
+		srv.logWriter, err = os.OpenFile(sc.Logfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, os.ModePerm)
+		if err != nil {
+			return nil, err
+		}
+		log.SetOutput(srv.logWriter)
 	}
 	p, err := newNotebookPool(sc.ImageRegexp, sc.MaxContainers, sc.ContainerLifetime)
 	if err != nil {
@@ -156,6 +166,12 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		err := srv.pool.releaseContainers(true)
 		if err != nil {
 			log.Print(err)
+		}
+		if c, ok := srv.logWriter.(io.Closer); ok {
+			log.Println("closing log file")
+			err = c.Close()
+			// If we hit an error, dump it to stdout.
+			log.SetOutput(os.Stdout)
 		}
 		os.Exit(0)
 	}()
