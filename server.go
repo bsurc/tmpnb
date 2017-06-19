@@ -100,6 +100,8 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			return nil, err
 		}
 	}
+	var err error
+	srv := &notebookServer{}
 	if sc.Logfile != "" {
 		srv.logWriter, err = os.OpenFile(sc.Logfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, os.ModePerm)
 		if err != nil {
@@ -112,7 +114,6 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		return nil, err
 	}
 	tkn := newHash(defaultHashSize)
-	srv := &notebookServer{}
 	srv.pool = p
 	srv.token = tkn
 	srv.pool.token = tkn
