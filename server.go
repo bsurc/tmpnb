@@ -420,9 +420,10 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		e := time.Until(nb.lastAccessed.Add(srv.pool.containerLifetime))
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", nb.hash[:8], nb.imageName, nb.lastAccessed, e)
 	}
-	fmt.Fprintln(w)
 	tw.Flush()
+	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Zombie Containers:\n")
+	fmt.Fprintln(w)
 	fmt.Fprintf(w, "ID\tNames\tImage\tCreated\n")
 	zombies, _ := srv.pool.zombieContainers()
 	for _, z := range zombies {
