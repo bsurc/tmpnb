@@ -202,7 +202,8 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 	id := r.FormValue("container")
 	cli, err := client.NewEnvClient()
 	if err != nil {
-		panic(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	filter := filters.NewArgs()
 	if id != "" {
@@ -211,13 +212,23 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 	opts := types.ContainerListOptions{
 		Filters: filter,
 	}
-	containers, err := cli.ContainerList(context.Background(), opts)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	var containers []types.Container
+	for i := 0; i < 3; i++ {
+		containers, err = cli.ContainerList(context.Background(), opts)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(containers) < 1 {
+			// Nothing is spun up yet, wait a tick, then try one more time.
+			time.Sleep(time.Second)
+			continue
+		} else {
+			break
+		}
 	}
-
 	if len(containers) < 1 {
+		log.Printf("could not find container %s", id)
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -381,20 +392,16 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	for _, nb := range nbs {
 		m[nb.imageName]++
 	}
-	sort.Slice(nbs, func(i, j int) bool {
-		return nbs[i].lastAccessed.Before(nbs[j].lastAccessed)
-	})
-	tw := tabwriter.NewWriter(w, 0, 8, 1, '\t', 0)
+	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	for k, v := range m {
 		fmt.Fprintf(tw, "%s\t%d\n", k, v)
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "All Containers:\n")
-	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\tExpires in\n")
+	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\n")
 	for _, nb := range nbs {
-		d := time.Until(nb.lastAccessed.Add(srv.pool.containerLifetime))
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", nb.hash[:8], nb.imageName, nb.lastAccessed, d)
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", nb.hash[:8], nb.imageName, nb.lastAccessed)
 	}
 	tw.Flush()
 }
