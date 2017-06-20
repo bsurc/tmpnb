@@ -236,6 +236,7 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 	log.Printf("container %s state: %s", id, state)
 	_, ping := r.Form["ping"]
 	if state != "running" {
+		log.Printf("container %s not running", id)
 		w.WriteHeader(http.StatusNotFound)
 	} else if !ping {
 		time.Sleep(time.Millisecond * 500)
