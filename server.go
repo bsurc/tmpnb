@@ -399,6 +399,10 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
+	// sort the notebooks by expiration
+	sort.Slice(nbs, func(i, j int) bool {
+		return nbs[i].lastAccessed.Before(nbs[j].lastAccessed)
+	})
 	fmt.Fprintf(w, "All Notebooks:\n")
 	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\tExpires in\n")
 	for _, nb := range nbs {
