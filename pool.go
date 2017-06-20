@@ -244,6 +244,24 @@ func (p *notebookPool) addNotebook(t *tempNotebook) error {
 	return nil
 }
 
+// stopAndKillContainer requests the stopping (docker stop) and the removal of
+// the container (docker rm).  Errors are logged, but not returned and rm is
+// always called.
+func (p *notebookPool) stopAndKillContainer(id string) {
+	d := time.Minute
+	cli, err := client.NewEnvClient()
+	if err != nil {
+		log.Print(err)
+	}
+	ctx := context.Background()
+	if err := cli.ContainerStop(ctx, id, &d); err != nil {
+		log.Print(err)
+	}
+	if err := cli.ContainerRemove(ctx, id, types.ContainerRemoveOptions{Force: true}); err != nil {
+		log.Print(err)
+	}
+}
+
 // activeNotebooks fetchs copies of the tempNotebooks and returns them as a
 // slice.
 func (p *notebookPool) activeNotebooks() []tempNotebook {
@@ -256,6 +274,32 @@ func (p *notebookPool) activeNotebooks() []tempNotebook {
 	}
 	p.Unlock()
 	return nbs
+}
+
+// zombieNotebooks queries docker for containers that aren't under our
+// supervision.  These can block ports assigned to our containers.
+func (p *notebookPool) zombieContainers() ([]types.Container, error) {
+	var cs []types.Container
+	ids := map[string]struct{}{}
+	p.Lock()
+	for _, c := range p.containerMap {
+		ids[c.id] = struct{}{}
+	}
+	p.Unlock()
+	cli, err := client.NewEnvClient()
+	opts := types.ContainerListOptions{}
+	containers, err := cli.ContainerList(context.Background(), opts)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range containers {
+		// If we manage it, leave it be
+		if _, ok := ids[c.ID]; ok {
+			continue
+		}
+		cs = append(cs, c)
+	}
+	return cs, nil
 }
 
 // startCollector launches a goroutine that checks for expired containers at
@@ -297,26 +341,31 @@ func (p *notebookPool) releaseContainers(force bool) error {
 			trash = append(trash, *c)
 		}
 	}
-	cli, err := client.NewEnvClient()
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-	d := time.Minute
 	for _, c := range trash {
+		// TODO(kyle): can we do this concurrently?
 		log.Printf("attempting to release container %s last accessed at %v", c.id, c.lastAccessed)
-		if err := cli.ContainerStop(ctx, c.id, &d); err != nil {
-			log.Print(err)
-		}
-		if err := cli.ContainerRemove(ctx, c.id, types.ContainerRemoveOptions{Force: true}); err != nil {
-			log.Print(err)
-		}
+		p.stopAndKillContainer(c.id)
 		p.portSet.Drop(c.port)
 		delete(p.containerMap, c.hash)
 		// This isn't very elegant, but we couldn't delete the pattern from the mux
 		// before, but now we can with the vendored/updated copy in mux.go.  We add
 		// a trailing slice when we register the path, so we must add it here too.
 		p.deregisterMux <- path.Join("/book", c.hash) + "/"
+	}
+	return nil
+}
+
+// killZombieContainers stops and kills any docker containers that aren't under
+// out supervision.
+//
+// FIXME(kyle): not currently called at any time, when, why, etc...
+func (p *notebookPool) killZombieContainers() error {
+	zombies, err := p.zombieContainers()
+	if err != nil {
+		return err
+	}
+	for _, c := range zombies {
+		p.stopAndKillContainer(c.ID)
 	}
 	return nil
 }

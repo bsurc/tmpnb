@@ -388,7 +388,7 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
 	nbs := srv.pool.activeNotebooks()
 	fmt.Fprintf(w, "Notebooks in use: %d\n", len(nbs))
-	fmt.Fprintf(w, "Containers by image:\n")
+	fmt.Fprintf(w, "Notebooks by image:\n")
 	m := map[string]int{}
 	for _, nb := range nbs {
 		m[nb.imageName]++
@@ -399,10 +399,20 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "All Containers:\n")
-	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\n")
+	fmt.Fprintf(w, "All Notebooks:\n")
+	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\tExpires in\n")
 	for _, nb := range nbs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", nb.hash[:8], nb.imageName, nb.lastAccessed)
+		e := time.Until(nb.lastAccessed.Add(srv.containerLifetime))
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", nb.hash[:8], nb.imageName, nb.lastAccessed, e)
+	}
+	fmt.Fprintln(w)
+	tw.Flush()
+	fmt.Fprintf(w, "Zombie Containers:\n")
+	fmt.Fprintf(w, "ID\tNames\tImage\tCreated\n")
+	zombies, _ := srv.pool.zombieContainers()
+	for _, z := range zombies {
+		t := time.Unix(z.Created, 0)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", z.ID, strings.Join(z.Names, ","), z.Image, t)
 	}
 	tw.Flush()
 }
