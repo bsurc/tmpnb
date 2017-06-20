@@ -388,8 +388,8 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
 	vm, _ := mem.VirtualMemory()
-	fmt.Fprintf(w, "Used memory: %d\n", vm.Used)
-	fmt.Fprintf(w, "Free memory: %d\n", vm.Free)
+	fmt.Fprintf(w, "Used memory: %d(%d MB)\n", vm.Used, vm.Used>>20)
+	fmt.Fprintf(w, "Free memory: %d(%d MB)\n", vm.Free, vm.Free>>20)
 	nbs := srv.pool.activeNotebooks()
 	fmt.Fprintf(w, "Notebooks in use: %d\n", len(nbs))
 	fmt.Fprintf(w, "Notebooks by image:\n")
