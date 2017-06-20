@@ -390,12 +390,19 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprintf(w, "Notebooks in use: %d\n", len(nbs))
 	fmt.Fprintf(w, "Notebooks by image:\n")
 	m := map[string]int{}
+	var keys []string
 	for _, nb := range nbs {
+		if _, ok := m[nb.imageName]; !ok {
+			keys = append(keys, nb.imageName)
+		}
 		m[nb.imageName]++
 	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
 	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
-	for k, v := range m {
-		fmt.Fprintf(tw, "%s\t%d\n", k, v)
+	for _, k := range keys {
+		fmt.Fprintf(tw, "%s\t%d\n", k, m[k])
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
