@@ -27,6 +27,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
+	"github.com/shirou/gopsutil/mem"
 )
 
 const (
@@ -386,6 +387,9 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 }
 
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
+        vm, _ := mem.VirtualMemory()
+        fmt.Fprintf(w, "Used memory: %s\n", vm.Used)
+        fmt.Fprintf(w, "Free memory: %s\n", vm.Free)
 	nbs := srv.pool.activeNotebooks()
 	fmt.Fprintf(w, "Notebooks in use: %d\n", len(nbs))
 	fmt.Fprintf(w, "Notebooks by image:\n")
