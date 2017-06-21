@@ -9,13 +9,15 @@ import (
 	"sync"
 )
 
+const portMapDebug = true
+
 // portRange manages available ports given a range
 type portRange struct {
 	// Mutex guards access to the bit map
 	sync.Mutex
 	// bits is the bit map representing the port range where bit 0 represents
 	// start
-	bits uint32
+	ports []bool
 	// start is the first port in the range
 	start int
 	// length is the range of ports so that start + length-1 == last port in
@@ -26,7 +28,8 @@ type portRange struct {
 // newPortRange creates a bit map that handles port assignments for the docker
 // containers.
 func newPortRange(start, length int) *portRange {
-	return &portRange{start: start, length: length}
+	ports := make([]bool, length)
+	return &portRange{ports: ports, start: start, length: length}
 }
 
 // Acquire finds an open port and returns it.  If no port is available
@@ -34,10 +37,10 @@ func newPortRange(start, length int) *portRange {
 func (pr *portRange) Acquire() (int, error) {
 	pr.Lock()
 	defer pr.Unlock()
-	for p := uint(0); p < uint(pr.length); p++ {
-		if pr.bits&(1<<p) == 0 {
-			pr.bits |= (1 << p)
-			return int(p) + pr.start, nil
+	for i, p := range pr.ports {
+		if !p {
+			pr.ports[i] = true
+			return pr.start + i, nil
 		}
 	}
 	return -1, errNotebookPoolFull
@@ -54,6 +57,6 @@ func (pr *portRange) Drop(p int) error {
 	if p < pr.start || p >= pr.start+pr.length {
 		return errPortOutOfRange
 	}
-	pr.bits &= ^(1 << uint(p-pr.start))
+	pr.ports[p-pr.start] = false
 	return nil
 }

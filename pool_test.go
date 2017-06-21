@@ -5,10 +5,12 @@
 package main
 
 import (
+	"regexp"
 	"testing"
 )
 
 func TestImageMatch(t *testing.T) {
+	match := regexp.MustCompile(jupyterNotebookImageMatch)
 	tests := []struct {
 		s string
 		m bool
@@ -23,7 +25,7 @@ func TestImageMatch(t *testing.T) {
 		{"jupyter/configurable-http-proxy:latest", false},
 	}
 	for _, test := range tests {
-		if imageMatch.MatchString(test.s) != test.m {
+		if match.MatchString(test.s) != test.m {
 			t.Errorf("missed match: %v", test)
 		}
 	}

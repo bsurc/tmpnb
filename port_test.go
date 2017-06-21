@@ -5,13 +5,8 @@
 package main
 
 import (
-	"fmt"
 	"testing"
 )
-
-func printBits(b uint32) string {
-	return fmt.Sprintf("%08b\n", b)
-}
 
 func TestPortRange(t *testing.T) {
 	pr := newPortRange(8000, 8)
@@ -19,22 +14,37 @@ func TestPortRange(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+	if !pr.ports[0] {
+		t.Errorf("didn't acquire port %d", p)
+	}
 	pr.Drop(p)
-	if pr.bits != 0 {
+	if pr.ports[0] {
 		t.Errorf("failed to drop %d", p)
 	}
+}
 
-	for i := 0; i < 3; i++ {
-		pr.Acquire()
+func TestFullPortRange(t *testing.T) {
+	const n = 8
+	const sp = 8000
+	pr := newPortRange(sp, n)
+	for i := 0; i < n; i++ {
+		_, err := pr.Acquire()
+		if err != nil {
+			t.Error(err)
+		}
 	}
-	mask := uint32(1<<3 - 1)
-	if pr.bits != mask {
-		t.Errorf("cleared wrong bit, exp: %s, got: %s", printBits(mask), printBits(pr.bits))
-	}
+}
 
-	pr.Drop(8000)
-	mask--
-	if pr.bits != mask {
-		t.Errorf("cleared wrong bit, exp: %s, got: %s", printBits(mask), printBits(pr.bits))
+func TestPortOverflow(t *testing.T) {
+	pr := newPortRange(8000, 100)
+	for i := 0; i < 100; i++ {
+		_, err := pr.Acquire()
+		if err != nil {
+			t.Error(err)
+		}
+	}
+	_, err := pr.Acquire()
+	if err != errNotebookPoolFull {
+		t.Errorf("should have errored with %s, didn't", errNotebookPoolFull)
 	}
 }
