@@ -17,7 +17,7 @@ import (
 func isWebsocket(r *http.Request) bool {
 	upgrade := false
 	for _, h := range r.Header["Connection"] {
-		if strings.Index(strings.ToLower(h), "upgrade") >= 0 {
+		if strings.Contains(strings.ToLower(h), "upgrade") {
 			upgrade = true
 			break
 		}
@@ -26,8 +26,9 @@ func isWebsocket(r *http.Request) bool {
 		return false
 	}
 
+	// FIXME(kyle): Can we just check for websocket in 'Upgrade'?
 	for _, h := range r.Header["Upgrade"] {
-		if strings.Index(strings.ToLower(h), "websocket") >= 0 {
+		if strings.Contains(strings.ToLower(h), "websocket") {
 			return true
 		}
 	}
