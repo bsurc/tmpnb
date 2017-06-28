@@ -53,19 +53,16 @@ type tempNotebook struct {
 
 // notebookPool holds data regarding running notebooks.
 type notebookPool struct {
-	// imageLock guards the available images map
-	imageMutex sync.Mutex
+	// guards the entire struct
+	sync.Mutex
+
 	// availableImages is a list of docker images that installed on the machine,
-	// and match the imageMatch expression.  The value stored indicates whether
-	// or not the image *has* to be pulled before the next container is spun up
-	// with the image.
-	availableImages map[string]bool
+	// and match the imageMatch expression
+	availableImages map[string]struct{}
 
 	// imageMatch filters available images by name
 	imageMatch *regexp.Regexp
 
-	// containerLock guards the container map
-	containerMutex sync.Mutex
 	// containerMap is stores the contexts for the containers.
 	containerMap map[string]*tempNotebook
 
@@ -108,7 +105,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 	if err != nil {
 		return nil, err
 	}
-	imageMap := map[string]bool{}
+	imageMap := map[string]struct{}{}
 	cli, err := client.NewEnvClient()
 	if err != nil {
 		return nil, err
@@ -122,7 +119,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 			continue
 		}
 		log.Printf("found image %s", image.RepoTags[0])
-		imageMap[strings.Split(image.RepoTags[0], ":")[0]] = false
+		imageMap[strings.Split(image.RepoTags[0], ":")[0]] = struct{}{}
 	}
 	pool := &notebookPool{
 		availableImages:   imageMap,
@@ -225,9 +222,9 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 
 // size returns the size of the containerMap with appropriate locks
 func (p *notebookPool) size() int {
-	p.containerMutex.Lock()
+	p.Lock()
 	n := len(p.containerMap)
-	p.containerMutex.Unlock()
+	p.Unlock()
 	return n
 }
 
@@ -241,9 +238,9 @@ func (p *notebookPool) addNotebook(t *tempNotebook) error {
 	if p.size()+1 > p.maxContainers {
 		return errNotebookPoolFull
 	}
-	p.containerMutex.Lock()
+	p.Lock()
 	p.containerMap[t.hash] = t
-	p.containerMutex.Unlock()
+	p.Unlock()
 	return nil
 }
 
@@ -269,13 +266,13 @@ func (p *notebookPool) stopAndKillContainer(id string) {
 // slice.
 func (p *notebookPool) activeNotebooks() []tempNotebook {
 	nbs := make([]tempNotebook, p.size())
-	p.containerMutex.Lock()
+	p.Lock()
 	i := 0
 	for _, nb := range p.containerMap {
 		nbs[i] = *nb
 		i++
 	}
-	p.containerMutex.Unlock()
+	p.Unlock()
 	return nbs
 }
 
@@ -284,11 +281,11 @@ func (p *notebookPool) activeNotebooks() []tempNotebook {
 func (p *notebookPool) zombieContainers() ([]types.Container, error) {
 	var cs []types.Container
 	ids := map[string]struct{}{}
-	p.containerMutex.Lock()
+	p.Lock()
 	for _, c := range p.containerMap {
 		ids[c.id] = struct{}{}
 	}
-	p.containerMutex.Unlock()
+	p.Unlock()
 	cli, err := client.NewEnvClient()
 	opts := types.ContainerListOptions{}
 	containers, err := cli.ContainerList(context.Background(), opts)
@@ -334,8 +331,8 @@ func (p *notebookPool) stopCollector() {
 // containerMap.  It also frees the port in the portSet.  If force is true, age
 // is ignored.
 func (p *notebookPool) releaseContainers(force bool) error {
-	p.containerMutex.Lock()
-	defer p.containerMutex.Unlock()
+	p.Lock()
+	defer p.Unlock()
 	trash := []tempNotebook{}
 	for _, c := range p.containerMap {
 		age := time.Now().Sub(c.lastAccessed)
