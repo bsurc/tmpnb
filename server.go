@@ -125,6 +125,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	//srv.mux = http.NewServeMux()
 	srv.mux = new(ServeMux)
 	srv.mux.Handle("/about", accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
+	srv.mux.Handle("/github/push", accessLogHandler(http.HandlerFunc(srv.githubPushHandler)))
 	srv.mux.Handle("/list", accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/static/", accessLogHandler(http.FileServer(http.Dir(sc.AssetPath))))
@@ -305,6 +306,13 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	_, pull := r.Form["pull"]
+	srv.pool.imageMutex.Lock()
+	if !pull {
+		if _, ok := srv.pool.availableImages[imageName]; ok {
+			pull = true
+		}
+	}
+	srv.pool.imageMutex.Lock()
 
 	tmpnb, err := srv.pool.newNotebook(imageName, pull)
 	if err != nil {
