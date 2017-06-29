@@ -1,5 +1,6 @@
 {
   "asset_path": "./assets",
+  "bsu_auth": true,
   "container_lifetime": 1000000000000,
   "enable_pprof": true,
   "image_regexp": ".*",

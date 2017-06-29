@@ -42,6 +42,7 @@ func init() {
 // TODO(kyle): embed or add to notebookServer?
 type serverConfig struct {
 	AssetPath         string        `json:"asset_path"`
+	UseBSUAuth        bool          `json:"bsu_auth"`
 	ContainerLifetime time.Duration `json:"container_lifetime"`
 	EnablePProf       bool          `json:"enable_pprof"`
 	ImageRegexp       string        `json:"image_regexp"`
@@ -79,6 +80,8 @@ type notebookServer struct {
 	templates *template.Template
 	// logging io.Writer
 	logWriter io.Writer
+	// useBSUAuth requires BSU SSO if true
+	useBSUAuth bool
 }
 
 // readConfig reads json config from r
@@ -124,17 +127,18 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	}
 	//srv.mux = http.NewServeMux()
 	srv.mux = new(ServeMux)
-	srv.mux.Handle("/about", accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
-	srv.mux.Handle("/list", accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
-	srv.mux.Handle("/new", accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
-	srv.mux.Handle("/static/", accessLogHandler(http.FileServer(http.Dir(sc.AssetPath))))
-	srv.mux.Handle("/stats", accessLogHandler(http.HandlerFunc(srv.statsHandler)))
-	srv.mux.Handle("/status", accessLogHandler(http.HandlerFunc(srv.statusHandler)))
+	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
+	srv.mux.Handle("/docker/push/", srv.accessLogHandler(http.HandlerFunc(srv.dockerPushHandler)))
+	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
+	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
+	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(sc.AssetPath))))
+	srv.mux.Handle("/stats", srv.accessLogHandler(http.HandlerFunc(srv.statsHandler)))
+	srv.mux.Handle("/status", srv.accessLogHandler(http.HandlerFunc(srv.statusHandler)))
 	if sc.EnablePProf {
-		srv.mux.Handle("/debug/pprof/", accessLogHandler(http.HandlerFunc(pprof.Index)))
-		srv.mux.Handle("/debug/pprof/cmdline", accessLogHandler(http.HandlerFunc(pprof.Cmdline)))
-		srv.mux.Handle("/debug/pprof/profile", accessLogHandler(http.HandlerFunc(pprof.Profile)))
-		srv.mux.Handle("/debug/pprof/symbol", accessLogHandler(http.HandlerFunc(pprof.Symbol)))
+		srv.mux.Handle("/debug/pprof/", srv.accessLogHandler(http.HandlerFunc(pprof.Index)))
+		srv.mux.Handle("/debug/pprof/cmdline", srv.accessLogHandler(http.HandlerFunc(pprof.Cmdline)))
+		srv.mux.Handle("/debug/pprof/profile", srv.accessLogHandler(http.HandlerFunc(pprof.Profile)))
+		srv.mux.Handle("/debug/pprof/symbol", srv.accessLogHandler(http.HandlerFunc(pprof.Symbol)))
 	}
 
 	srv.Handler = srv.mux
@@ -142,6 +146,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.tlsCert = sc.TLSCert
 	srv.tlsKey = sc.TLSKey
 	srv.httpRedirect = sc.HTTPRedirect
+	srv.useBSUAuth = sc.UseBSUAuth
 
 	templateFiles, err := filepath.Glob(filepath.Join(sc.AssetPath, "templates", "*.html"))
 	if err != nil {
@@ -184,8 +189,10 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	return srv, nil
 }
 
-func accessLogHandler(h http.Handler) http.Handler {
+func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
+		if srv.useBSUAuth {
+		}
 		log.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		h.ServeHTTP(w, r)
 	}
@@ -368,6 +375,70 @@ func (srv *notebookServer) aboutHandler(w http.ResponseWriter, r *http.Request) 
 		log.Print(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+type dockerPush struct {
+	CallbackURL string `json:"callback_url"`
+	PushData    struct {
+		Images   []string `json:"images"`
+		PushedAt float64  `json:"pushed_at"`
+		Pusher   string   `json:"pusher"`
+		Tag      string   `json:"tag"`
+	} `json:"push_data"`
+	Repository struct {
+		CommentCount    string  `json:"comment_count"`
+		DateCreated     float64 `json:"date_created"`
+		Description     string  `json:"description"`
+		Dockerfile      string  `json:"dockerfile"`
+		FullDescription string  `json:"full_description"`
+		IsOfficial      bool    `json:"is_official"`
+		IsPrivate       bool    `json:"is_private"`
+		IsTrusted       bool    `json:"is_trusted"`
+		Name            string  `json:"name"`
+		Namespace       string  `json:"namespace"`
+		Owner           string  `json:"owner"`
+		RepoName        string  `json:"repo_name"`
+		RepoURL         string  `json:"repo_url"`
+		StarCount       int     `json:"star_count"`
+		Status          string  `json:"status"`
+	} `json:"repository"`
+}
+
+func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		return
+	}
+	log.Print("request for docker pull")
+	var push dockerPush
+	if err := json.NewDecoder(r.Body).Decode(&push); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	repo := push.Repository.RepoName
+	var update bool
+	srv.pool.Lock()
+	_, update = srv.pool.availableImages[repo]
+	srv.pool.Unlock()
+	if !update {
+		log.Printf("image: %s not on server", repo)
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	ctx := context.Background()
+	cli, err := client.NewEnvClient()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("attempting to pull %s", repo)
+	_, err = cli.ImagePull(ctx, repo, types.ImagePullOptions{})
+	if err != nil {
+		log.Printf("pull failed: %s", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("pull successful")
 }
 
 // listImagesHandler lists html links to the different docker images.
