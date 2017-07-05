@@ -158,9 +158,11 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 
 	// TODO(kyle): possibly provide tag support
 
+	const defaultTag = ":latest"
+
 	if pull {
 		log.Printf("pulling container %s", image)
-		_, err = cli.ImagePull(ctx, image, types.ImagePullOptions{})
+		_, err = cli.ImagePull(ctx, image+defaultTag, types.ImagePullOptions{})
 		if err != nil {
 			return nil, err
 		}
