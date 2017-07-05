@@ -159,10 +159,12 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 	// TODO(kyle): possibly provide tag support
 
 	if pull {
+		log.Printf("pulling container %s", image)
 		_, err = cli.ImagePull(ctx, image, types.ImagePullOptions{})
 		if err != nil {
 			return nil, err
 		}
+		log.Printf("successfully pulled")
 	}
 
 	hash := newHash(defaultHashSize)
