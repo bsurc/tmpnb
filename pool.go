@@ -35,6 +35,9 @@ const (
 
 	// defaultMaxContainers governs the port set size and triggers reclamation
 	defaultMaxContainers = 100
+
+	// defaultTag sets the tag for the image pull
+	defaultTag = ":latest"
 )
 
 // tempNotebook holds context for a single container
@@ -157,9 +160,6 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 	}
 
 	// TODO(kyle): possibly provide tag support
-
-	const defaultTag = ":latest"
-
 	if pull {
 		log.Printf("pulling container %s", image)
 		_, err = cli.ImagePull(ctx, image+defaultTag, types.ImagePullOptions{})
