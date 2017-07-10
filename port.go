@@ -6,6 +6,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"sync"
 )
 
@@ -39,6 +41,14 @@ func (pr *portRange) Acquire() (int, error) {
 	defer pr.Unlock()
 	for i, p := range pr.ports {
 		if !p {
+			host := fmt.Sprintf(":%d", pr.start+i)
+			s, err := net.Listen("tcp", host)
+			if err != nil {
+				// port in use, probably a zombie
+				// TODO(kyle): increase port range so we still get length ports?
+				continue
+			}
+			s.Close()
 			pr.ports[i] = true
 			return pr.start + i, nil
 		}
