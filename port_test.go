@@ -58,7 +58,6 @@ func TestZombiePort(t *testing.T) {
 	}
 	// steal port 8001
 	s, err := net.Listen("tcp", ":8001")
-	// if it fails then the port is likely taken
 	if err != nil {
 		t.Error(err)
 	}
