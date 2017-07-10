@@ -432,7 +432,7 @@ func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	log.Printf("attempting to pull %s", repo)
-	_, err = cli.ImagePull(ctx, repo, types.ImagePullOptions{})
+	_, err = cli.ImagePull(ctx, repo+defaultTag, types.ImagePullOptions{})
 	if err != nil {
 		log.Printf("pull failed: %s", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
