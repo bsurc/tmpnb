@@ -112,14 +112,14 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	var err error
 	srv := &notebookServer{}
 	if sc.AccessLogfile != "" {
-		srv.accessLogWriter, err = os.OpenFile(sc.AccessLogfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, os.ModePerm)
+		srv.accessLogWriter, err = os.OpenFile(sc.AccessLogfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 		if err != nil {
 			return nil, err
 		}
 		srv.accessLog = log.New(srv.accessLogWriter, "ACCESS", log.LstdFlags|log.Lshortfile)
 	}
 	if sc.Logfile != "" {
-		srv.logWriter, err = os.OpenFile(sc.Logfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, os.ModePerm)
+		srv.logWriter, err = os.OpenFile(sc.Logfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 		if err != nil {
 			return nil, err
 		}
