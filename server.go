@@ -48,6 +48,7 @@ type serverConfig struct {
 	ImageRegexp       string        `json:"image_regexp"`
 	MaxContainers     int           `json:"max_containers"`
 	HTTPRedirect      bool          `json:"http_redirect"`
+	AccessLogfile     string        `json:"access_logfile"`
 	Logfile           string        `json:"logfile"`
 	Port              string        `json:"port"`
 	TLSCert           string        `json:"tls_cert"`
@@ -78,10 +79,13 @@ type notebookServer struct {
 	tlsKey string
 	// html templates
 	templates *template.Template
-	// logging io.Writer
+	// accessLogWriter is the access logging Writer
+	accessLogWriter io.Writer
+	// accessLog logs access
+	accessLog *log.Logger
+	// logWriter is the error logging Writer, the standard logger handles all
+	// others.
 	logWriter io.Writer
-	// useBSUAuth requires BSU SSO if true
-	useBSUAuth bool
 }
 
 // readConfig reads json config from r
@@ -107,6 +111,13 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	}
 	var err error
 	srv := &notebookServer{}
+	if sc.AccessLogfile != "" {
+		srv.accessLogWriter, err = os.OpenFile(sc.AccessLogfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, os.ModePerm)
+		if err != nil {
+			return nil, err
+		}
+		srv.accessLog = log.New(srv.accessLogWriter, "ACCESS", log.LstdFlags|log.Lshortfile)
+	}
 	if sc.Logfile != "" {
 		srv.logWriter, err = os.OpenFile(sc.Logfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, os.ModePerm)
 		if err != nil {
@@ -146,7 +157,6 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.tlsCert = sc.TLSCert
 	srv.tlsKey = sc.TLSKey
 	srv.httpRedirect = sc.HTTPRedirect
-	srv.useBSUAuth = sc.UseBSUAuth
 
 	templateFiles, err := filepath.Glob(filepath.Join(sc.AssetPath, "templates", "*.html"))
 	if err != nil {
@@ -174,6 +184,17 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			err = c.Close()
 			// If we hit an error, dump it to stdout.
 			log.SetOutput(os.Stdout)
+			if err != nil {
+				log.Print(err)
+			}
+		}
+		if c, ok := srv.accessLogWriter.(io.Closer); ok {
+			log.Println("closing log file")
+			err = c.Close()
+			// If we hit an error, dump it to stdout.
+			if err != nil {
+				log.Print(err)
+			}
 		}
 		os.Exit(0)
 	}()
@@ -191,9 +212,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
-		if srv.useBSUAuth {
-		}
-		log.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
+		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		h.ServeHTTP(w, r)
 	}
 	return http.HandlerFunc(f)
@@ -336,7 +355,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	log.Printf("handler: %s", handlerPath)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		tmpnb.lastAccessed = time.Now()
-		log.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
+		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		if isWebsocket(r) {
 			log.Print("proxying to websocket handler")
 			f := websocketProxy(fmt.Sprintf(":%d", tmpnb.port))
