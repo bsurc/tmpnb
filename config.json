@@ -12,7 +12,9 @@
   "tls_cert": "",
   "tls_key": "",
   "oauth_confg": {
-    "whitelist": null,
+    "whitelist": [
+       "kyleshannon@boisestate.edu"
+    ],
     "match": ""
   }
 }

@@ -245,6 +245,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.Handle("/docker/push/", srv.accessLogHandler(http.HandlerFunc(srv.dockerPushHandler)))
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
+	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
 	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(sc.AssetPath))))
 	srv.mux.Handle("/stats", srv.accessLogHandler(http.HandlerFunc(srv.statsHandler)))
 	srv.mux.Handle("/status", srv.accessLogHandler(http.HandlerFunc(srv.statusHandler)))
@@ -568,6 +569,15 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 // aboutHandler serves the about text directly.
 func (srv *notebookServer) aboutHandler(w http.ResponseWriter, r *http.Request) {
 	err := srv.templates.ExecuteTemplate(w, "about", nil)
+	if err != nil {
+		log.Print(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// privacyHandler serves the privacy text directly.
+func (srv *notebookServer) privacyHandler(w http.ResponseWriter, r *http.Request) {
+	err := srv.templates.ExecuteTemplate(w, "privacy", nil)
 	if err != nil {
 		log.Print(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
