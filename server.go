@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -19,8 +20,10 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -28,11 +31,15 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/shirou/gopsutil/mem"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
 
 const (
 	// defaultNotebook is used if the request doesn't specify a docker image.
 	defaultNotebook = "jupyter/minimal-notebook"
+	// sessionKey is the cookie name for session managment
+	sessionKey = "sessionKey"
 )
 
 func init() {
@@ -53,6 +60,7 @@ type serverConfig struct {
 	Port              string        `json:"port"`
 	TLSCert           string        `json:"tls_cert"`
 	TLSKey            string        `json:"tls_key"`
+	AuthDomainRegexp  string        `json:"auth_domain"`
 }
 
 var defaultConfig = serverConfig{
@@ -61,12 +69,43 @@ var defaultConfig = serverConfig{
 	MaxContainers:     defaultMaxContainers,
 }
 
+type session struct {
+	m     map[string]string
+	token *oauth2.Token
+}
+
+func newSession() *session {
+	return &session{make(map[string]string), nil}
+}
+
+func (s *session) get(key string) string {
+	return s.m[key]
+}
+
+func (s *session) set(key, val string) {
+	s.m[key] = val
+}
+
 // notebookServer handles the http tasks for the temporary notebooks.
 type notebookServer struct {
 	// pool manages the containers
 	pool *notebookPool
 	// token is the generated random auth token
 	token string
+	// sessionLock guards sessions
+	sessionLock sync.Mutex
+	// sessions holds cookie keys and user emails
+	sessions map[string]*session
+	// oauthConf is the OAuth2 client configuration
+	oauthConf *oauth2.Config
+	// oauthState is the string passed to the api to validate on return
+	oauthState string
+	// oauthToken is the API token
+	oauthToken string
+	// oauthSecret is the API secret
+	oauthSecret string
+	// oauthDomainRegexp is used to match whitelisted domains
+	oauthDomainRegexp *regexp.Regexp
 	// mux routes http traffic
 	mux *ServeMux
 	// embed a server
@@ -116,7 +155,9 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		if err != nil {
 			return nil, err
 		}
-		srv.accessLog = log.New(srv.accessLogWriter, "ACCESS", log.LstdFlags|log.Lshortfile)
+		srv.accessLog = log.New(srv.accessLogWriter, "ACCESS: ", log.LstdFlags|log.Lshortfile)
+	} else {
+		srv.accessLog = log.New(os.Stdout, "ACCESS: ", log.LstdFlags|log.Lshortfile)
 	}
 	if sc.Logfile != "" {
 		srv.logWriter, err = os.OpenFile(sc.Logfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
@@ -136,9 +177,40 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.Server = &http.Server{
 		Addr: sc.Port,
 	}
-	//srv.mux = http.NewServeMux()
+	// OAuth
+	srv.sessions = map[string]*session{}
+	// FIXME(kyle): errors after we add files
+	apiToken, err := ioutil.ReadFile(filepath.Join(sc.AssetPath, "token"))
+	if err != nil {
+		return nil, err
+	}
+	srv.oauthToken = strings.TrimSpace(string(apiToken))
+	apiSecret, err := ioutil.ReadFile(filepath.Join(sc.AssetPath, "secret"))
+	if err != nil {
+		return nil, err
+	}
+	srv.oauthSecret = strings.TrimSpace(string(apiSecret))
+	srv.oauthConf = &oauth2.Config{
+		ClientID:     srv.oauthToken,
+		ClientSecret: srv.oauthSecret,
+		RedirectURL:  "http://127.0.0.1:8888/auth",
+		Scopes: []string{
+			"https://www.googleapis.com/auth/userinfo.email",
+		},
+		Endpoint: google.Endpoint,
+	}
+	srv.oauthState = newHash(defaultHashSize)
+	if sc.AuthDomainRegexp != "" {
+		srv.oauthDomainRegexp, err = regexp.Compile(sc.AuthDomainRegexp)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Use the internal mux, it has deregister
 	srv.mux = new(ServeMux)
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
+	srv.mux.HandleFunc("/auth", srv.oauthHandler)
 	srv.mux.Handle("/docker/push/", srv.accessLogHandler(http.HandlerFunc(srv.dockerPushHandler)))
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
@@ -212,10 +284,69 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
+		var ok bool
+		var ses *session
 		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
+		c, err := r.Cookie(sessionKey)
+		if err == nil {
+			srv.sessionLock.Lock()
+			ses, ok = srv.sessions[c.Value]
+			srv.sessionLock.Unlock()
+		}
+		if !ok || !ses.token.Valid() {
+			http.Redirect(w, r, srv.oauthConf.AuthCodeURL(srv.oauthState), http.StatusTemporaryRedirect)
+			return
+		}
 		h.ServeHTTP(w, r)
 	}
 	return http.HandlerFunc(f)
+}
+
+func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseForm()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	tok, err := srv.oauthConf.Exchange(oauth2.NoContext, r.FormValue("code"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	client := srv.oauthConf.Client(oauth2.NoContext, tok)
+	resp, err := client.Get("https://www.googleapis.com/oauth2/v3/userinfo")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer resp.Body.Close()
+
+	type oauthUser struct {
+		Sub           string `json:"sub"`
+		Email         string `json:"email"`
+		EmailVerified bool   `json:"email_verified"`
+		Domain        string `json:"hd"`
+	}
+
+	var u oauthUser
+	err = json.NewDecoder(resp.Body).Decode(&u)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if srv.oauthDomainRegexp != nil && !srv.oauthDomainRegexp.MatchString(u.Domain) {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+	key := newHash(defaultHashSize)
+	srv.sessionLock.Lock()
+	srv.sessions[key] = newSession()
+	srv.sessions[key].token = tok
+	srv.sessions[key].set("sub", u.Sub)
+	srv.sessions[key].set("email", u.Email)
+	srv.sessionLock.Unlock()
+	http.SetCookie(w, &http.Cookie{Name: sessionKey, Value: key, MaxAge: 0})
+	http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
 }
 
 // statusHandler checks the status of a single container, returning 200 if it

@@ -4,11 +4,12 @@
   "container_lifetime": 1000000000000,
   "enable_pprof": true,
   "image_regexp": ".*",
-  "access_logfile": "access_tmpnb.log",
-  "logfile": "tmpnb.log",
+  "access_logfile": "",
+  "logfile": "",
   "max_containers": 100,
   "http_redirect": false,
   "port": ":8888",
   "tls_cert": "",
-  "tls_key": ""
+  "tls_key": "",
+  "auth_domain": "(u.)?boisestate.edu"
 }
