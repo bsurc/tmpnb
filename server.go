@@ -368,7 +368,20 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	_, white := srv.oauthWhiteList[u.Email]
-	if (srv.oauthMatch != nil && !srv.oauthMatch.MatchString(u.Email)) && !white {
+	if white {
+		log.Printf("%s is whitelisted", u.Email)
+	} else {
+		log.Printf("%s is not whitelisted", u.Email)
+	}
+
+	matched := srv.oauthMatch != nil && !srv.oauthMatch.MatchString(u.Email)
+	if matched {
+		log.Printf("%s is regexp match", u.Email)
+	} else {
+		log.Printf("%s is not regexp match", u.Email)
+	}
+
+	if !white && !matched {
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
