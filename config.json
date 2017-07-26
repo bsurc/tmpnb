@@ -11,5 +11,8 @@
   "port": ":8888",
   "tls_cert": "",
   "tls_key": "",
-  "auth_domain": "(u.)?boisestate.edu"
+  "oauth_confg": {
+    "whitelist": null,
+    "match": ""
+  }
 }

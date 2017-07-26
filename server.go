@@ -40,6 +40,14 @@ const (
 	defaultNotebook = "jupyter/minimal-notebook"
 	// sessionKey is the cookie name for session managment
 	sessionKey = "sessionKey"
+	// bsuDefaultRegexp is a regular expression allowing all u.boisestate.edu and
+	// boisestate.edu users login.  As far as we know, BSU doesn't allow symbols
+	// in emails, but we may have to add:
+	//
+	// !#$%&'*+-/=?^_`{|}~
+	//
+	// in the future.
+	bsuRegexp = `^.+@(u.)?boisestate.edu$`
 )
 
 func init() {
@@ -60,7 +68,10 @@ type serverConfig struct {
 	Port              string        `json:"port"`
 	TLSCert           string        `json:"tls_cert"`
 	TLSKey            string        `json:"tls_key"`
-	AuthDomainRegexp  string        `json:"auth_domain"`
+	OAuthConfig       struct {
+		WhiteList []string `json:"whitelist"`
+		RegExp    string   `json:"match"`
+	} `json:"oauth_confg"`
 }
 
 var defaultConfig = serverConfig{
@@ -96,6 +107,9 @@ type notebookServer struct {
 	sessionLock sync.Mutex
 	// sessions holds cookie keys and user emails
 	sessions map[string]*session
+
+	// enableOAuth if the
+	enableOAuth bool
 	// oauthConf is the OAuth2 client configuration
 	oauthConf *oauth2.Config
 	// oauthState is the string passed to the api to validate on return
@@ -105,7 +119,9 @@ type notebookServer struct {
 	// oauthSecret is the API secret
 	oauthSecret string
 	// oauthDomainRegexp is used to match whitelisted domains
-	oauthDomainRegexp *regexp.Regexp
+	oauthMatch *regexp.Regexp
+	// oauthWhiteList is automagically enabled user emails
+	oauthWhiteList map[string]struct{}
 	// mux routes http traffic
 	mux *ServeMux
 	// embed a server
@@ -200,12 +216,27 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		Endpoint: google.Endpoint,
 	}
 	srv.oauthState = newHash(defaultHashSize)
-	if sc.AuthDomainRegexp != "" {
-		srv.oauthDomainRegexp, err = regexp.Compile(sc.AuthDomainRegexp)
-		if err != nil {
-			return nil, err
+	srv.enableOAuth = sc.OAuthConfig.RegExp != "" || len(sc.OAuthConfig.WhiteList) > 0
+	if srv.enableOAuth {
+		switch sc.OAuthConfig.RegExp {
+		case "bsu":
+			srv.oauthMatch = regexp.MustCompile(bsuRegexp)
+		case "":
+			break
+		default:
+			if srv.oauthMatch, err = regexp.Compile(sc.OAuthConfig.RegExp); err != nil {
+				return nil, err
+			}
 		}
 	}
+	log.Println("OAuth2 whitelist:")
+	srv.oauthWhiteList = map[string]struct{}{}
+	for _, s := range sc.OAuthConfig.WhiteList {
+		srv.oauthWhiteList[s] = struct{}{}
+		log.Println(s)
+	}
+
+	log.Println("OAuth2 regexp:", sc.OAuthConfig.RegExp)
 
 	// Use the internal mux, it has deregister
 	srv.mux = new(ServeMux)
@@ -287,15 +318,17 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 		var ok bool
 		var ses *session
 		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
-		c, err := r.Cookie(sessionKey)
-		if err == nil {
-			srv.sessionLock.Lock()
-			ses, ok = srv.sessions[c.Value]
-			srv.sessionLock.Unlock()
-		}
-		if !ok || !ses.token.Valid() {
-			http.Redirect(w, r, srv.oauthConf.AuthCodeURL(srv.oauthState), http.StatusTemporaryRedirect)
-			return
+		if srv.enableOAuth {
+			c, err := r.Cookie(sessionKey)
+			if err == nil {
+				srv.sessionLock.Lock()
+				ses, ok = srv.sessions[c.Value]
+				srv.sessionLock.Unlock()
+			}
+			if !ok || !ses.token.Valid() {
+				http.Redirect(w, r, srv.oauthConf.AuthCodeURL(srv.oauthState), http.StatusTemporaryRedirect)
+				return
+			}
 		}
 		h.ServeHTTP(w, r)
 	}
@@ -334,7 +367,8 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if srv.oauthDomainRegexp != nil && !srv.oauthDomainRegexp.MatchString(u.Domain) {
+	_, white := srv.oauthWhiteList[u.Email]
+	if (srv.oauthMatch != nil && !srv.oauthMatch.MatchString(u.Email)) && !white {
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
