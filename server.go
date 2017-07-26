@@ -374,7 +374,7 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 		log.Printf("%s is not whitelisted", u.Email)
 	}
 
-	matched := srv.oauthMatch != nil && !srv.oauthMatch.MatchString(u.Email)
+	matched := srv.oauthMatch != nil && srv.oauthMatch.MatchString(u.Email)
 	if matched {
 		log.Printf("%s is regexp match", u.Email)
 	} else {
