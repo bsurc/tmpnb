@@ -206,6 +206,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		return nil, err
 	}
 	srv.oauthSecret = strings.TrimSpace(string(apiSecret))
+	// TODO(kyle): fix RedirectURL so we don't have to set it manually
 	srv.oauthConf = &oauth2.Config{
 		ClientID:     srv.oauthToken,
 		ClientSecret: srv.oauthSecret,
