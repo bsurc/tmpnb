@@ -241,6 +241,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 	// Use the internal mux, it has deregister
 	srv.mux = new(ServeMux)
+	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
 	srv.mux.Handle("/docker/push/", srv.accessLogHandler(http.HandlerFunc(srv.dockerPushHandler)))
