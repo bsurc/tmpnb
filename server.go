@@ -40,6 +40,8 @@ const (
 	defaultNotebook = "jupyter/minimal-notebook"
 	// sessionKey is the cookie name for session managment
 	sessionKey = "sessionKey"
+	// redirectKey holds some context on login/oauth
+	redirectKey = "redirectFrom"
 	// bsuDefaultRegexp is a regular expression allowing all u.boisestate.edu and
 	// boisestate.edu users login.  As far as we know, BSU doesn't allow symbols
 	// in emails, but we may have to add:
@@ -122,6 +124,12 @@ type notebookServer struct {
 	oauthMatch *regexp.Regexp
 	// oauthWhiteList is automagically enabled user emails
 	oauthWhiteList map[string]struct{}
+	// redirectLock locks the redirectMap
+	redirectLock sync.Mutex
+	// redirectMap handles initial incoming requests before the user is
+	// authenticated through OAuth.  The keys are a session type key, the value
+	// is the path and query string of the request.
+	redirectMap map[string]string
 	// mux routes http traffic
 	mux *ServeMux
 	// embed a server
@@ -237,6 +245,8 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		log.Println(s)
 	}
 
+	srv.redirectMap = map[string]string{}
+
 	log.Println("OAuth2 regexp:", sc.OAuthConfig.RegExp)
 
 	// Use the internal mux, it has deregister
@@ -329,6 +339,41 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				srv.sessionLock.Unlock()
 			}
 			if !ok || !ses.token.Valid() {
+				u, err := url.Parse(r.RequestURI)
+				if err != nil {
+					// revert to default handling
+					u.Path = "/list"
+					log.Print(err)
+				}
+				// If the request is asking for some specific resource, and the user
+				// isn't authenticated, store the request state and try to redirect
+				// properly after the authentication.
+				switch u.Path {
+				case "/", "/about", "/list", "/privacy", "/stats":
+					break
+				default:
+					key := newHash(defaultHashSize)
+					srv.redirectLock.Lock()
+					srv.redirectMap[key] = r.RequestURI
+					srv.redirectLock.Unlock()
+					const redirectExpire = 60
+					http.SetCookie(w, &http.Cookie{Name: redirectKey, Value: key, MaxAge: redirectExpire})
+					// Delete the key after 2 * redirectExpire.  This ensures that the
+					// map is cleared, even if the key is never used.  We could do it
+					// right after it's used, but if something goes wrong, or the user
+					// doesn't authenticate successfully, it will never be deleted.  The
+					// javascript function that creates the link for the new container
+					// times out after 60 seconds, so the cookie expires after that, then
+					// the map is cleaned up soon after.
+					go func() {
+						<-time.After(redirectExpire * time.Second * 2)
+						srv.redirectLock.Lock()
+						delete(srv.redirectMap, key)
+						log.Printf("redirect map size: %d", len(srv.redirectMap))
+						srv.redirectLock.Unlock()
+					}()
+					log.Printf("setting redirect map %s: %s", key, r.RequestURI)
+				}
 				http.Redirect(w, r, srv.oauthConf.AuthCodeURL(srv.oauthState), http.StatusTemporaryRedirect)
 				return
 			}
@@ -396,7 +441,20 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 	srv.sessions[key].set("email", u.Email)
 	srv.sessionLock.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: sessionKey, Value: key, MaxAge: 0})
-	http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
+	c, err := r.Cookie(redirectKey)
+	if err != nil {
+		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
+		return
+	}
+	srv.redirectLock.Lock()
+	uri, ok := srv.redirectMap[c.Value]
+	srv.redirectLock.Unlock()
+	if !ok {
+		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
+		return
+	}
+	log.Printf("using custom redirect %s", r.RequestURI)
+	http.Redirect(w, r, uri, http.StatusTemporaryRedirect)
 }
 
 // statusHandler checks the status of a single container, returning 200 if it
