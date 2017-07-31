@@ -21,6 +21,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -725,6 +726,7 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 }
 
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Go version: %s\n", runtime.Version())
 	vm, _ := mem.VirtualMemory()
 	fmt.Fprintf(w, "Used memory: %d(%d MB)\n", vm.Used, vm.Used>>20)
 	fmt.Fprintf(w, "Free memory: %d(%d MB)\n", vm.Free, vm.Free>>20)
