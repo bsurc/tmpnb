@@ -84,6 +84,10 @@ type notebookPool struct {
 	// killCollection stops the automated resource reclamation
 	killCollection chan struct{}
 
+	// lastCollection is the timestamp the last time the containers were
+	// reclaimed.
+	lastCollection time.Time
+
 	// deregisterMux is a channel for sending a path that needs to be
 	// de-registered from the server mux.
 	deregisterMux chan string
@@ -135,6 +139,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		deregisterMux:     make(chan string),
 	}
 	pool.startCollector(time.Duration(int64(lifetime) / 4))
+	pool.lastCollection = time.Now()
 	return pool, nil
 }
 
@@ -306,6 +311,11 @@ func (p *notebookPool) zombieContainers() ([]types.Container, error) {
 	return cs, nil
 }
 
+// nextCollection returns when the collector is run again
+func (p *notebookPool) NextCollection() time.Time {
+	return p.lastCollection.Add(p.containerLifetime)
+}
+
 // startCollector launches a goroutine that checks for expired containers at
 // interval d.  d is typically set to containerLifetime / 4.  Call
 // stopCollector to stop the reclamation.
@@ -316,6 +326,7 @@ func (p *notebookPool) startCollector(d time.Duration) {
 			select {
 			case <-ticker.C:
 				p.releaseContainers(false)
+				p.lastCollection = time.Now()
 			case <-p.killCollection:
 				ticker.Stop()
 				return
