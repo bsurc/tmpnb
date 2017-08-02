@@ -564,6 +564,12 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		imageName = defaultNotebook
 	}
 
+	// Make old links backwards compatible.  Add a tag if it doesn't have one.
+	// Use 'latest' as the default.
+	if !strings.Contains(imageName, ":") {
+		imageName += ":latest"
+	}
+
 	if _, ok := srv.pool.availableImages[imageName]; !ok {
 		http.Error(w, fmt.Sprintf("invalid image name: %s", imageName), http.StatusBadRequest)
 		log.Printf("invalid image name: %s", imageName)
@@ -700,7 +706,7 @@ func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	log.Printf("attempting to pull %s", repo)
-	_, err = cli.ImagePull(ctx, repo+defaultTag, types.ImagePullOptions{})
+	_, err = cli.ImagePull(ctx, repo, types.ImagePullOptions{})
 	if err != nil {
 		log.Printf("pull failed: %s", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)

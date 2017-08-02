@@ -12,7 +12,6 @@ import (
 	"log"
 	"path"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -35,9 +34,6 @@ const (
 
 	// defaultMaxContainers governs the port set size and triggers reclamation
 	defaultMaxContainers = 100
-
-	// defaultTag sets the tag for the image pull
-	defaultTag = ":latest"
 )
 
 // tempNotebook holds context for a single container
@@ -126,7 +122,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 			continue
 		}
 		log.Printf("found image %s", image.RepoTags[0])
-		imageMap[strings.Split(image.RepoTags[0], ":")[0]] = struct{}{}
+		imageMap[image.RepoTags[0]] = struct{}{}
 	}
 	pool := &notebookPool{
 		availableImages:   imageMap,
@@ -166,8 +162,8 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 
 	// TODO(kyle): possibly provide tag support
 	if pull {
-		log.Printf("pulling container %s", image+defaultTag)
-		_, err = cli.ImagePull(ctx, image+defaultTag, types.ImagePullOptions{})
+		log.Printf("pulling container %s", image)
+		_, err = cli.ImagePull(ctx, image, types.ImagePullOptions{})
 		if err != nil {
 			return nil, err
 		}
