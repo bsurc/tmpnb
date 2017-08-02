@@ -166,7 +166,7 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 
 	// TODO(kyle): possibly provide tag support
 	if pull {
-		log.Printf("pulling container %s", image)
+		log.Printf("pulling container %s", image+defaultTag)
 		_, err = cli.ImagePull(ctx, image+defaultTag, types.ImagePullOptions{})
 		if err != nil {
 			return nil, err
@@ -330,8 +330,6 @@ func (p *notebookPool) startCollector(d time.Duration) {
 			case <-p.killCollection:
 				ticker.Stop()
 				return
-			default:
-				time.Sleep(d)
 			}
 		}
 	}()
@@ -347,7 +345,6 @@ func (p *notebookPool) stopCollector() {
 // is ignored.
 func (p *notebookPool) releaseContainers(force bool) error {
 	p.Lock()
-	defer p.Unlock()
 	trash := []tempNotebook{}
 	for _, c := range p.containerMap {
 		age := time.Now().Sub(c.lastAccessed)
@@ -356,16 +353,21 @@ func (p *notebookPool) releaseContainers(force bool) error {
 			trash = append(trash, *c)
 		}
 	}
+	p.Unlock()
 	for _, c := range trash {
-		// TODO(kyle): can we do this concurrently?
-		log.Printf("attempting to release container %s last accessed at %v", c.id, c.lastAccessed)
-		p.stopAndKillContainer(c.id)
-		p.portSet.Drop(c.port)
-		delete(p.containerMap, c.hash)
-		// This isn't very elegant, but we couldn't delete the pattern from the mux
-		// before, but now we can with the vendored/updated copy in mux.go.  We add
-		// a trailing slice when we register the path, so we must add it here too.
-		p.deregisterMux <- path.Join("/book", c.hash) + "/"
+		c := c
+		go func() {
+			log.Printf("attempting to release container %s last accessed at %v", c.id, c.lastAccessed)
+			p.stopAndKillContainer(c.id)
+			p.portSet.Drop(c.port)
+			p.Lock()
+			delete(p.containerMap, c.hash)
+			p.Unlock()
+			// This isn't very elegant, but we couldn't delete the pattern from the mux
+			// before, but now we can with the vendored/updated copy in mux.go.  We add
+			// a trailing slice when we register the path, so we must add it here too.
+			p.deregisterMux <- path.Join("/book", c.hash) + "/"
+		}()
 	}
 	return nil
 }
