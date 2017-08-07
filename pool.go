@@ -34,6 +34,10 @@ const (
 
 	// defaultMaxContainers governs the port set size and triggers reclamation
 	defaultMaxContainers = 100
+
+	// collectionFraction is the fraction of lifetime to collect containers.  For
+	// example 4 collects every 1/4 of the container lifetime.
+	collectionFraction = 4
 )
 
 // tempNotebook holds context for a single container
@@ -134,7 +138,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		killCollection:    make(chan struct{}),
 		deregisterMux:     make(chan string),
 	}
-	pool.startCollector(time.Duration(int64(lifetime) / 4))
+	pool.startCollector(time.Duration(int64(lifetime) / collectionFraction))
 	pool.lastCollection = time.Now()
 	return pool, nil
 }
@@ -309,11 +313,11 @@ func (p *notebookPool) zombieContainers() ([]types.Container, error) {
 
 // nextCollection returns when the collector is run again
 func (p *notebookPool) NextCollection() time.Time {
-	return p.lastCollection.Add(p.containerLifetime)
+	return p.lastCollection.Add(p.containerLifetime / collectionFraction)
 }
 
 // startCollector launches a goroutine that checks for expired containers at
-// interval d.  d is typically set to containerLifetime / 4.  Call
+// interval d.  d is typically set to containerLifetime / collectionFraction.  Call
 // stopCollector to stop the reclamation.
 func (p *notebookPool) startCollector(d time.Duration) {
 	go func() {
