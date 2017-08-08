@@ -803,7 +803,6 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	tw.Flush()
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Zombie Containers:\n")
-	fmt.Fprintln(w)
 	fmt.Fprintf(w, "ID\tNames\tImage\tCreated\n")
 	zombies, _ := srv.pool.zombieContainers()
 	for _, z := range zombies {
