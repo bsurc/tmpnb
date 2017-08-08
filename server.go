@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -718,7 +719,15 @@ func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		defer out.Close()
-		log.Print(ioutil.ReadAll(out))
+		s := bufio.NewScanner(out)
+		var ps dockerPullStatus
+		for s.Scan() {
+			err := json.Unmarshal([]byte(s.Text()), &ps)
+			if err != nil {
+				log.Print(err)
+			}
+			log.Print(ps.Progress)
+		}
 	}()
 }
 
