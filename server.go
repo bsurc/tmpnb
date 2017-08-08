@@ -701,20 +701,24 @@ func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Requ
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	ctx := context.Background()
-	cli, err := client.NewEnvClient()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	log.Printf("attempting to pull %s", repo)
-	_, err = cli.ImagePull(ctx, repo, types.ImagePullOptions{})
-	if err != nil {
-		log.Printf("pull failed: %s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	log.Printf("pull successful")
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*20)
+		defer cancel()
+		cli, err := client.NewEnvClient()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("attempting to pull %s", repo)
+		out, err := cli.ImagePull(ctx, repo, types.ImagePullOptions{})
+		if err != nil {
+			log.Printf("pull failed: %s", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer out.Close()
+		log.Print(ioutil.ReadAll(out))
+	}()
 }
 
 // listImagesHandler lists html links to the different docker images.

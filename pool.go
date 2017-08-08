@@ -5,12 +5,12 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"path"
 	"regexp"
@@ -177,16 +177,31 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 	// TODO(kyle): possibly provide tag support
 	if pull {
 		log.Printf("pulling container %s", image)
-		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 		defer cancel()
 		r, err := cli.ImagePull(ctx, image, types.ImagePullOptions{})
 		if err != nil {
 			return nil, err
 		}
 		defer r.Close()
-		var b bytes.Buffer
-		io.Copy(&b, r)
-		log.Print(string(b.Bytes()))
+		type pullProg struct {
+			ID             string `json:"id"`
+			Progress       string `json:"progress"`
+			ProgressDetail struct {
+				Current int `json:"current"`
+				Total   int `json:"total"`
+			} `json:"progressDetail"`
+			Status string `json:"status"`
+		}
+		s := bufio.NewScanner(r)
+		var p pullProg
+		for s.Scan() {
+			err := json.Unmarshal([]byte(s.Text()), &p)
+			if err != nil {
+				log.Print(err)
+			}
+			log.Print(p.Progress)
+		}
 	}
 
 	hash := newHash(defaultHashSize)
