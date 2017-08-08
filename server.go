@@ -353,7 +353,7 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				case "/", "/about", "/list", "/privacy", "/stats":
 					break
 				case "/docker/push/":
-					dockerPushHandler(w, r)
+					srv.dockerPushHandler(w, r)
 					return
 				default:
 					key := newHash(defaultHashSize)
