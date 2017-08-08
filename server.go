@@ -60,14 +60,14 @@ func init() {
 
 // TODO(kyle): embed or add to notebookServer?
 type serverConfig struct {
+	AccessLogfile     string        `json:"access_logfile"`
 	AssetPath         string        `json:"asset_path"`
-	UseBSUAuth        bool          `json:"bsu_auth"`
 	ContainerLifetime time.Duration `json:"container_lifetime"`
+	EnableDockerPush  bool          `json:"enable_docker_push"`
 	EnablePProf       bool          `json:"enable_pprof"`
 	ImageRegexp       string        `json:"image_regexp"`
-	MaxContainers     int           `json:"max_containers"`
 	HTTPRedirect      bool          `json:"http_redirect"`
-	AccessLogfile     string        `json:"access_logfile"`
+	MaxContainers     int           `json:"max_containers"`
 	Logfile           string        `json:"logfile"`
 	Port              string        `json:"port"`
 	TLSCert           string        `json:"tls_cert"`
@@ -111,7 +111,8 @@ type notebookServer struct {
 	sessionMu sync.Mutex
 	// sessions holds cookie keys and user emails
 	sessions map[string]*session
-
+	// enableDockerPush listens for container updates
+	enableDockerPush bool
 	// enableOAuth if the
 	enableOAuth bool
 	// oauthConf is the OAuth2 client configuration
@@ -250,6 +251,9 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.redirectMap = map[string]string{}
 
 	log.Println("OAuth2 regexp:", sc.OAuthConfig.RegExp)
+
+	// Docker push support
+	srv.enableDockerPush = sc.EnableDockerPush
 
 	// Use the internal mux, it has deregister
 	srv.mux = new(ServeMux)
@@ -681,6 +685,10 @@ type dockerPush struct {
 }
 
 func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Request) {
+	if !srv.enableDockerPush {
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		log.Print("invalid /docker/push/ method")
