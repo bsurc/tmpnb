@@ -255,7 +255,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
-	srv.mux.Handle("/docker/push/", srv.accessLogHandler(http.HandlerFunc(srv.dockerPushHandler)))
+	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
@@ -352,9 +352,6 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				switch u.Path {
 				case "/", "/about", "/list", "/privacy", "/stats":
 					break
-				case "/docker/push/":
-					srv.dockerPushHandler(w, r)
-					return
 				default:
 					key := newHash(defaultHashSize)
 					srv.redirectMu.Lock()
@@ -659,42 +656,43 @@ func (srv *notebookServer) privacyHandler(w http.ResponseWriter, r *http.Request
 type dockerPush struct {
 	CallbackURL string `json:"callback_url"`
 	PushData    struct {
-		Images   []string `json:"images"`
-		PushedAt float64  `json:"pushed_at"`
-		Pusher   string   `json:"pusher"`
-		Tag      string   `json:"tag"`
+		Images   []interface{} `json:"images"`
+		PushedAt int           `json:"pushed_at"`
+		Pusher   string        `json:"pusher"`
+		Tag      string        `json:"tag"`
 	} `json:"push_data"`
 	Repository struct {
-		CommentCount    string  `json:"comment_count"`
-		DateCreated     float64 `json:"date_created"`
-		Description     string  `json:"description"`
-		Dockerfile      string  `json:"dockerfile"`
-		FullDescription string  `json:"full_description"`
-		IsOfficial      bool    `json:"is_official"`
-		IsPrivate       bool    `json:"is_private"`
-		IsTrusted       bool    `json:"is_trusted"`
-		Name            string  `json:"name"`
-		Namespace       string  `json:"namespace"`
-		Owner           string  `json:"owner"`
-		RepoName        string  `json:"repo_name"`
-		RepoURL         string  `json:"repo_url"`
-		StarCount       int     `json:"star_count"`
-		Status          string  `json:"status"`
+		CommentCount    int         `json:"comment_count"`
+		DateCreated     int         `json:"date_created"`
+		Description     string      `json:"description"`
+		FullDescription interface{} `json:"full_description"`
+		IsOfficial      bool        `json:"is_official"`
+		IsPrivate       bool        `json:"is_private"`
+		IsTrusted       bool        `json:"is_trusted"`
+		Name            string      `json:"name"`
+		Namespace       string      `json:"namespace"`
+		Owner           string      `json:"owner"`
+		RepoName        string      `json:"repo_name"`
+		RepoURL         string      `json:"repo_url"`
+		StarCount       int         `json:"star_count"`
+		Status          string      `json:"status"`
 	} `json:"repository"`
 }
 
 func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		log.Print("invalid /docker/push/ method")
 		return
 	}
 	log.Print("request for docker pull")
 	var push dockerPush
 	if err := json.NewDecoder(r.Body).Decode(&push); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Print(err)
 		return
 	}
-	repo := push.Repository.RepoName
+	repo := push.Repository.RepoName + ":" + push.PushData.Tag
 	var update bool
 	srv.pool.Lock()
 	_, update = srv.pool.availableImages[repo]

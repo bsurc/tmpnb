@@ -166,11 +166,22 @@ func newHash(n int) string {
 	return fmt.Sprintf("%x", b)
 }
 
+type dockerPullStatus struct {
+	ID             string `json:"id"`
+	Progress       string `json:"progress"`
+	ProgressDetail struct {
+		Current int `json:"current"`
+		Total   int `json:"total"`
+	} `json:"progressDetail"`
+	Status string `json:"status"`
+}
+
 // newNotebook initializes and sets values for a new notebook.
 func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, error) {
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
 	if err != nil {
+		log.Print(err)
 		return nil, err
 	}
 
@@ -179,28 +190,20 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 		log.Printf("pulling container %s", image)
 		ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 		defer cancel()
-		r, err := cli.ImagePull(ctx, image, types.ImagePullOptions{})
+		out, err := cli.ImagePull(ctx, image, types.ImagePullOptions{})
 		if err != nil {
+			log.Print(err)
 			return nil, err
 		}
-		defer r.Close()
-		type pullProg struct {
-			ID             string `json:"id"`
-			Progress       string `json:"progress"`
-			ProgressDetail struct {
-				Current int `json:"current"`
-				Total   int `json:"total"`
-			} `json:"progressDetail"`
-			Status string `json:"status"`
-		}
-		s := bufio.NewScanner(r)
-		var p pullProg
+		defer out.Close()
+		s := bufio.NewScanner(out)
+		var ps dockerPullStatus
 		for s.Scan() {
-			err := json.Unmarshal([]byte(s.Text()), &p)
+			err := json.Unmarshal([]byte(s.Text()), &ps)
 			if err != nil {
 				log.Print(err)
 			}
-			log.Print(p.Progress)
+			log.Print(ps.Progress)
 		}
 	}
 
