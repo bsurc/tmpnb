@@ -5,10 +5,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"path"
 	"regexp"
@@ -177,11 +179,14 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 		log.Printf("pulling container %s", image)
 		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		defer cancel()
-		_, err = cli.ImagePull(ctx, image, types.ImagePullOptions{})
+		r, err := cli.ImagePull(ctx, image, types.ImagePullOptions{})
 		if err != nil {
 			return nil, err
 		}
-		log.Printf("successfully pulled")
+		defer r.Close()
+		var b bytes.Buffer
+		io.Copy(&b, r)
+		log.Print(string(b.Bytes()))
 	}
 
 	hash := newHash(defaultHashSize)
