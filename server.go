@@ -107,7 +107,7 @@ type notebookServer struct {
 	// token is the generated random auth token
 	token string
 	// sessionLock guards sessions
-	sessionLock sync.Mutex
+	sessionMu sync.Mutex
 	// sessions holds cookie keys and user emails
 	sessions map[string]*session
 
@@ -126,7 +126,7 @@ type notebookServer struct {
 	// oauthWhiteList is automagically enabled user emails
 	oauthWhiteList map[string]struct{}
 	// redirectLock locks the redirectMap
-	redirectLock sync.Mutex
+	redirectMu sync.Mutex
 	// redirectMap handles initial incoming requests before the user is
 	// authenticated through OAuth.  The keys are a session type key, the value
 	// is the path and query string of the request.
@@ -335,9 +335,9 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 		if srv.enableOAuth {
 			c, err := r.Cookie(sessionKey)
 			if err == nil {
-				srv.sessionLock.Lock()
+				srv.sessionMu.Lock()
 				ses, ok = srv.sessions[c.Value]
-				srv.sessionLock.Unlock()
+				srv.sessionMu.Unlock()
 			}
 			if !ok || !ses.token.Valid() {
 				u, err := url.Parse(r.RequestURI)
@@ -354,9 +354,9 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 					break
 				default:
 					key := newHash(defaultHashSize)
-					srv.redirectLock.Lock()
+					srv.redirectMu.Lock()
 					srv.redirectMap[key] = r.RequestURI
-					srv.redirectLock.Unlock()
+					srv.redirectMu.Unlock()
 					const redirectExpire = 60
 					http.SetCookie(w, &http.Cookie{Name: redirectKey, Value: key, MaxAge: redirectExpire})
 					// Delete the key after 2 * redirectExpire.  This ensures that the
@@ -368,10 +368,10 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 					// the map is cleaned up soon after.
 					go func() {
 						<-time.After(redirectExpire * time.Second * 2)
-						srv.redirectLock.Lock()
+						srv.redirectMu.Lock()
 						delete(srv.redirectMap, key)
 						log.Printf("redirect map size: %d", len(srv.redirectMap))
-						srv.redirectLock.Unlock()
+						srv.redirectMu.Unlock()
 					}()
 					log.Printf("setting redirect map %s: %s", key, r.RequestURI)
 				}
@@ -435,21 +435,21 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	key := newHash(defaultHashSize)
-	srv.sessionLock.Lock()
+	srv.sessionMu.Lock()
 	srv.sessions[key] = newSession()
 	srv.sessions[key].token = tok
 	srv.sessions[key].set("sub", u.Sub)
 	srv.sessions[key].set("email", u.Email)
-	srv.sessionLock.Unlock()
+	srv.sessionMu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: sessionKey, Value: key, MaxAge: 0})
 	c, err := r.Cookie(redirectKey)
 	if err != nil {
 		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
 		return
 	}
-	srv.redirectLock.Lock()
+	srv.redirectMu.Lock()
 	uri, ok := srv.redirectMap[c.Value]
-	srv.redirectLock.Unlock()
+	srv.redirectMu.Unlock()
 	if !ok {
 		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
 		return
