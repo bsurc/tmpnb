@@ -350,8 +350,11 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				// isn't authenticated, store the request state and try to redirect
 				// properly after the authentication.
 				switch u.Path {
-				case "/", "/about", "/list", "/privacy", "/stats", "/docker/push/":
+				case "/", "/about", "/list", "/privacy", "/stats":
 					break
+				case "/docker/push/":
+					dockerPushHandler(w, r)
+					return
 				default:
 					key := newHash(defaultHashSize)
 					srv.redirectMu.Lock()
