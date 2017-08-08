@@ -600,7 +600,9 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	handlerPath := path.Join("/book", tmpnb.hash) + "/"
 	log.Printf("handler: %s", handlerPath)
 	handler := func(w http.ResponseWriter, r *http.Request) {
+		tmpnb.Lock()
 		tmpnb.lastAccessed = time.Now()
+		tmpnb.Unlock()
 		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		if isWebsocket(r) {
 			log.Print("proxying to websocket handler")
@@ -760,13 +762,21 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprintln(w)
 	// sort the notebooks by expiration
 	sort.Slice(nbs, func(i, j int) bool {
-		return nbs[i].lastAccessed.Before(nbs[j].lastAccessed)
+		nbs[i].Lock()
+		a := nbs[i].lastAccessed
+		nbs[i].Unlock()
+		nbs[j].Lock()
+		b := nbs[j].lastAccessed
+		nbs[j].Unlock()
+		return a.Before(b)
 	})
 	fmt.Fprintf(w, "All Notebooks:\n")
 	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\tExpires in\n")
 	for _, nb := range nbs {
+		nb.Lock()
 		e := time.Until(nb.lastAccessed.Add(srv.pool.containerLifetime))
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", nb.hash[:8], nb.imageName, nb.lastAccessed, e)
+		nb.Unlock()
 	}
 	tw.Flush()
 	fmt.Fprintln(w)

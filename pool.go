@@ -42,6 +42,8 @@ const (
 
 // tempNotebook holds context for a single container
 type tempNotebook struct {
+	// guard struct (only used for lastAccessed right now)
+	sync.Mutex
 	// id is the docker container id.
 	id string
 	// hash is  a random generated hash that is used in the path of the server.
@@ -83,6 +85,10 @@ type notebookPool struct {
 
 	// killCollection stops the automated resource reclamation
 	killCollection chan struct{}
+
+	// lastCollMu guards the time for reclamation.  It is used infrequently, and
+	// we don't need to lock the whole object.
+	lastCollMu sync.Mutex
 
 	// lastCollection is the timestamp the last time the containers were
 	// reclaimed.
@@ -139,7 +145,9 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		deregisterMux:     make(chan string),
 	}
 	pool.startCollector(time.Duration(int64(lifetime) / collectionFraction))
+	pool.lastCollMu.Lock()
 	pool.lastCollection = time.Now()
+	pool.lastCollMu.Unlock()
 	return pool, nil
 }
 
@@ -219,7 +227,13 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 		return nil, err
 	}
 	log.Printf("created container: %s", resp.ID)
-	t := &tempNotebook{resp.ID, hash, image, time.Now(), port}
+	t := &tempNotebook{
+		id:           resp.ID,
+		hash:         hash,
+		imageName:    image,
+		lastAccessed: time.Now(),
+		port:         port,
+	}
 	err = p.addNotebook(t)
 	if err != nil {
 		log.Print(err)
@@ -313,7 +327,10 @@ func (p *notebookPool) zombieContainers() ([]types.Container, error) {
 
 // nextCollection returns when the collector is run again
 func (p *notebookPool) NextCollection() time.Time {
-	return p.lastCollection.Add(p.containerLifetime / collectionFraction)
+	p.lastCollMu.Lock()
+	t := p.lastCollection.Add(p.containerLifetime / collectionFraction)
+	p.lastCollMu.Unlock()
+	return t
 }
 
 // startCollector launches a goroutine that checks for expired containers at
@@ -326,7 +343,9 @@ func (p *notebookPool) startCollector(d time.Duration) {
 			select {
 			case <-ticker.C:
 				p.releaseContainers(false)
+				p.lastCollMu.Lock()
 				p.lastCollection = time.Now()
+				p.lastCollMu.Unlock()
 			case <-p.killCollection:
 				ticker.Stop()
 				return
@@ -347,11 +366,13 @@ func (p *notebookPool) releaseContainers(force bool) error {
 	p.Lock()
 	trash := []tempNotebook{}
 	for _, c := range p.containerMap {
+		c.Lock()
 		age := time.Now().Sub(c.lastAccessed)
 		if age.Seconds() > p.containerLifetime.Seconds() || force {
 			log.Printf("age: %v\n", age)
 			trash = append(trash, *c)
 		}
+		c.Unlock()
 	}
 	p.Unlock()
 	for _, c := range trash {
@@ -365,7 +386,7 @@ func (p *notebookPool) releaseContainers(force bool) error {
 			p.Unlock()
 			// This isn't very elegant, but we couldn't delete the pattern from the mux
 			// before, but now we can with the vendored/updated copy in mux.go.  We add
-			// a trailing slice when we register the path, so we must add it here too.
+			// a trailing slash when we register the path, so we must add it here too.
 			p.deregisterMux <- path.Join("/book", c.hash) + "/"
 		}()
 	}
