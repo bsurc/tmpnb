@@ -1,7 +1,7 @@
 {
   "asset_path": "./assets",
-  "bsu_auth": true,
-  "container_lifetime": 60000000000,
+  "bsu_auth": false,
+  "container_lifetime": 1000000000000,
   "enable_pprof": true,
   "image_regexp": ".*",
   "access_logfile": "",
@@ -13,7 +13,6 @@
   "tls_key": "",
   "oauth_confg": {
     "whitelist": [
-       "kyleshannon@boisestate.edu"
     ],
     "match": ""
   }

@@ -350,7 +350,7 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				// isn't authenticated, store the request state and try to redirect
 				// properly after the authentication.
 				switch u.Path {
-				case "/", "/about", "/list", "/privacy", "/stats":
+				case "/", "/about", "/list", "/privacy", "/stats", "/docker/push/":
 					break
 				default:
 					key := newHash(defaultHashSize)
