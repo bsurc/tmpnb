@@ -114,3 +114,27 @@ func TestTemperatureStat_String(t *testing.T) {
 		t.Errorf("TemperatureStat string is invalid")
 	}
 }
+
+func TestVirtualization(t *testing.T) {
+	system, role, err := Virtualization()
+	if err != nil {
+		t.Errorf("Virtualization() failed, %v", err)
+	}
+	if system == "" || role == "" {
+		t.Errorf("Virtualization() retuns empty system or role:  %s, %s", system, role)
+	}
+
+	t.Logf("Virtualization(): %s, %s", system, role)
+}
+
+func TestKernelVersion(t *testing.T) {
+	version, err := KernelVersion()
+	if err != nil {
+		t.Errorf("KernelVersion() failed, %v", err)
+	}
+	if version == "" {
+		t.Errorf("KernelVersion() retuns empty: %s", version)
+	}
+
+	t.Logf("KernelVersion(): %s", version)
+}

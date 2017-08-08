@@ -4,8 +4,8 @@
 [[projects]]
   name = "cloud.google.com/go"
   packages = ["compute/metadata"]
-  revision = "a5913b3f7deecba45e98ff33cefbac4fd204ddd7"
-  version = "v0.10.0"
+  revision = "44bcd0b2078ba5e7fedbeb36808d1ed893534750"
+  version = "v0.11.0"
 
 [[projects]]
   name = "github.com/Microsoft/go-winio"
@@ -47,7 +47,7 @@
   branch = "master"
   name = "github.com/golang/protobuf"
   packages = ["proto"]
-  revision = "748d386b5c1ea99658fd69fe9f03991ce86a90c1"
+  revision = "1909bc2f63dc92bb931deace8b8312c4db72d12f"
 
 [[projects]]
   name = "github.com/opencontainers/runc"
@@ -64,26 +64,26 @@
 [[projects]]
   name = "github.com/shirou/gopsutil"
   packages = ["internal/common","mem"]
-  revision = "aa0a3bce9d1f4efc710ed812f19f77851da2eedd"
-  version = "v2.17.06"
+  revision = "114c78c777eb86b58e40910cbd3fc451829c366d"
+  version = "v2.17.07"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/net"
   packages = ["context","context/ctxhttp","proxy"]
-  revision = "f5079bd7f6f74e23c4d65efa0f4ce14cbd6a3c0f"
+  revision = "167db312be3be3d239e24dbe0ab099ab5b9aa783"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/oauth2"
   packages = [".","google","internal","jws","jwt"]
-  revision = "b53b38ad8a6435bd399ea76d0fa74f23149cca4e"
+  revision = "9a379c6b3e95a790ffc43293c2a78dee0d7b6e20"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix","windows"]
-  revision = "0f826bdd13b500be0f1d4004938ad978fcc6031e"
+  revision = "47bdb838cce8879fca08207206a5dfde2f2538bc"
 
 [[projects]]
   name = "google.golang.org/appengine"
