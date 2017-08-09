@@ -166,16 +166,6 @@ func newHash(n int) string {
 	return fmt.Sprintf("%x", b)
 }
 
-type dockerPullStatus struct {
-	ID             string `json:"id"`
-	Progress       string `json:"progress"`
-	ProgressDetail struct {
-		Current int `json:"current"`
-		Total   int `json:"total"`
-	} `json:"progressDetail"`
-	Status string `json:"status"`
-}
-
 // newNotebook initializes and sets values for a new notebook.
 func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, error) {
 	ctx := context.Background()
