@@ -58,6 +58,20 @@ type tempNotebook struct {
 	port int
 }
 
+func copyNotebook(n *tempNotebook) *tempNotebook {
+	if n == nil {
+		return nil
+	}
+
+	return &tempNotebook{
+		id:           n.id,
+		hash:         n.id,
+		imageName:    n.imageName,
+		lastAccessed: n.lastAccessed,
+		port:         n.port,
+	}
+}
+
 // notebookPool holds data regarding running notebooks.
 type notebookPool struct {
 	// guards the entire struct
@@ -301,13 +315,13 @@ func (p *notebookPool) stopAndKillContainer(id string) {
 }
 
 // activeNotebooks fetchs copies of the tempNotebooks and returns them as a
-// slice.
-func (p *notebookPool) activeNotebooks() []tempNotebook {
-	nbs := make([]tempNotebook, p.size())
+// slice of pointers.
+func (p *notebookPool) activeNotebooks() []*tempNotebook {
+	nbs := make([]*tempNotebook, p.size())
 	p.Lock()
 	i := 0
 	for _, nb := range p.containerMap {
-		nbs[i] = *nb
+		nbs[i] = copyNotebook(nb)
 		i++
 	}
 	p.Unlock()
@@ -379,13 +393,13 @@ func (p *notebookPool) stopCollector() {
 // is ignored.
 func (p *notebookPool) releaseContainers(force bool) error {
 	p.Lock()
-	trash := []tempNotebook{}
+	trash := []*tempNotebook{}
 	for _, c := range p.containerMap {
 		c.Lock()
 		age := time.Now().Sub(c.lastAccessed)
 		if age.Seconds() > p.containerLifetime.Seconds() || force {
 			log.Printf("age: %v\n", age)
-			trash = append(trash, *c)
+			trash = append(trash, copyNotebook(c))
 		}
 		c.Unlock()
 	}
