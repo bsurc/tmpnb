@@ -1,6 +1,6 @@
 {
   "asset_path": "./assets",
-  "container_lifetime": 1000000000000,
+  "container_lifetime": 60000000000,
   "enable_docker_push": true,
   "enable_pprof": true,
   "image_regexp": ".*",
