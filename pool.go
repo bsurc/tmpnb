@@ -271,7 +271,7 @@ func (p *notebookPool) addNotebook(t *tempNotebook) error {
 	n := p.size()
 	log.Printf("pool size: %d of %d", n+1, p.maxContainers)
 	if p.size()+1 > p.maxContainers {
-		p.releaseContainers(false)
+		p.releaseContainers(false, true)
 	}
 	if p.size()+1 > p.maxContainers {
 		return errNotebookPoolFull
@@ -301,13 +301,20 @@ func (p *notebookPool) stopAndKillContainer(id string) {
 }
 
 // activeNotebooks fetchs copies of the tempNotebooks and returns them as a
-// slice of pointers.
+// slice.  The lock is obviously invalid.
 func (p *notebookPool) activeNotebooks() []tempNotebook {
 	nbs := make([]tempNotebook, p.size())
 	p.Lock()
 	i := 0
-	for _, nb := range p.containerMap {
-		nbs[i] = *nb
+	for k := range p.containerMap {
+		c := p.containerMap[k]
+		nbs[i] = tempNotebook{
+			id:           c.id,
+			hash:         c.hash,
+			imageName:    c.imageName,
+			lastAccessed: c.lastAccessed,
+			port:         c.port,
+		}
 		i++
 	}
 	p.Unlock()
@@ -357,7 +364,7 @@ func (p *notebookPool) startCollector(d time.Duration) {
 		for {
 			select {
 			case <-ticker.C:
-				p.releaseContainers(false)
+				p.releaseContainers(false, true)
 				p.lastCollMu.Lock()
 				p.lastCollection = time.Now()
 				p.lastCollMu.Unlock()
@@ -377,7 +384,7 @@ func (p *notebookPool) stopCollector() {
 // releaseContainers checks for expired containers and frees them from the
 // containerMap.  It also frees the port in the portSet.  If force is true, age
 // is ignored.
-func (p *notebookPool) releaseContainers(force bool) error {
+func (p *notebookPool) releaseContainers(force, async bool) error {
 	p.Lock()
 	trash := []tempNotebook{}
 	for _, c := range p.containerMap {
@@ -385,14 +392,27 @@ func (p *notebookPool) releaseContainers(force bool) error {
 		age := time.Now().Sub(c.lastAccessed)
 		if age.Seconds() > p.containerLifetime.Seconds() || force {
 			log.Printf("age: %v\n", age)
-			trash = append(trash, *c)
+			//trash = append(trash, *c)
+			trash = append(trash, tempNotebook{
+				id:           c.id,
+				hash:         c.hash,
+				imageName:    c.imageName,
+				lastAccessed: c.lastAccessed,
+				port:         c.port,
+			})
 		}
 		c.Unlock()
 	}
 	p.Unlock()
-	for _, c := range trash {
-		c := c
-		go func() {
+	for i := 0; i < len(trash); i++ {
+		c := tempNotebook{
+			id:           trash[i].id,
+			hash:         trash[i].hash,
+			imageName:    trash[i].imageName,
+			lastAccessed: trash[i].lastAccessed,
+			port:         trash[i].port,
+		}
+		f := func(c tempNotebook) {
 			log.Printf("attempting to release container %s last accessed at %v", c.id, c.lastAccessed)
 			p.stopAndKillContainer(c.id)
 			p.portSet.Drop(c.port)
@@ -403,7 +423,12 @@ func (p *notebookPool) releaseContainers(force bool) error {
 			// before, but now we can with the vendored/updated copy in mux.go.  We add
 			// a trailing slash when we register the path, so we must add it here too.
 			p.deregisterMux <- path.Join("/book", c.hash) + "/"
-		}()
+		}
+		if async {
+			go f(c)
+		} else {
+			f(c)
+		}
 	}
 	return nil
 }

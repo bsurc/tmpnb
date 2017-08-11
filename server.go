@@ -297,7 +297,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	go func() {
 		<-quit
 		log.Println("Shutting down server...")
-		err := srv.pool.releaseContainers(true)
+		err := srv.pool.releaseContainers(true, false)
 		if err != nil {
 			log.Print(err)
 		}
@@ -736,16 +736,18 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprintf(w, "Free memory: %d(%d MB)\n", vm.Free, vm.Free>>20)
 	t := srv.pool.NextCollection()
 	fmt.Fprintf(w, "Next container reclamation: %s (%s)\n", t, t.Sub(time.Now()))
+	// XXX: these are copies, they are local and we don't need to hold locks when
+	// accessing them.
 	nbs := srv.pool.activeNotebooks()
 	fmt.Fprintf(w, "Notebooks in use: %d\n", len(nbs))
 	fmt.Fprintf(w, "Notebooks by image:\n")
 	m := map[string]int{}
 	var keys []string
-	for _, nb := range nbs {
-		if _, ok := m[nb.imageName]; !ok {
-			keys = append(keys, nb.imageName)
+	for i := 0; i < len(nbs); i++ {
+		if _, ok := m[nbs[i].imageName]; !ok {
+			keys = append(keys, nbs[i].imageName)
 		}
-		m[nb.imageName]++
+		m[nbs[i].imageName]++
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		return keys[i] < keys[j]
@@ -758,21 +760,15 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprintln(w)
 	// sort the notebooks by expiration
 	sort.Slice(nbs, func(i, j int) bool {
-		nbs[i].Lock()
 		a := nbs[i].lastAccessed
-		nbs[i].Unlock()
-		nbs[j].Lock()
 		b := nbs[j].lastAccessed
-		nbs[j].Unlock()
 		return a.Before(b)
 	})
 	fmt.Fprintf(w, "All Notebooks:\n")
 	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\tExpires in\n")
-	for _, nb := range nbs {
-		nb.Lock()
-		e := time.Until(nb.lastAccessed.Add(srv.pool.containerLifetime))
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", nb.hash[:8], nb.imageName, nb.lastAccessed, e)
-		nb.Unlock()
+	for i := 0; i < len(nbs); i++ {
+		e := time.Until(nbs[i].lastAccessed.Add(srv.pool.containerLifetime))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", nbs[i].hash[:8], nbs[i].imageName, nbs[i].lastAccessed, e)
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
