@@ -405,14 +405,21 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 	}
 	p.Unlock()
 	for i := 0; i < len(trash); i++ {
-		c := tempNotebook{
+		type nbCopy struct {
+			id           string
+			hash         string
+			imageName    string
+			lastAccessed time.Time
+			port         int
+		}
+		c := nbCopy{
 			id:           trash[i].id,
 			hash:         trash[i].hash,
 			imageName:    trash[i].imageName,
 			lastAccessed: trash[i].lastAccessed,
 			port:         trash[i].port,
 		}
-		f := func(c tempNotebook) {
+		f := func(c nbCopy) {
 			log.Printf("attempting to release container %s last accessed at %v", c.id, c.lastAccessed)
 			p.stopAndKillContainer(c.id)
 			p.portSet.Drop(c.port)
