@@ -43,6 +43,9 @@ RUN conda install --quiet --yes --channel glotzer \
     'vincent=0.4.*' \
     'beautifulsoup4=4.5.*' \
     'xlrd' \
+    'gsd' \
+    'fresnel' \
+    'freud' \
     'hoomd' && \
     conda remove --quiet --yes --force qt pyqt && \
     conda clean -tipsy

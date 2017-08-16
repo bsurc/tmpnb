@@ -18,6 +18,7 @@ func TestBSURegexp(t *testing.T) {
 		{"kyleshannon@boisestate.edu", true},
 		{"k@boisestate.edu", true},
 		{"kyleshannon@u.boisestate.edu", true},
+		{"kyleshannon@uxboisestate.edu", false},
 		{"k@u.boisestate.edu", true},
 		{"@boisestate.edu", false},
 		{"kyleshannon@boisestate.com", false},

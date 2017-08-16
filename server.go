@@ -51,7 +51,7 @@ const (
 	// !#$%&'*+-/=?^_`{|}~
 	//
 	// in the future.  See RFC 5322 (https://tools.ietf.org/html/rfc5322).
-	bsuRegexp = `^.+@(u.)?boisestate.edu$`
+	bsuRegexp = `^.+@(u\.)?boisestate.edu$`
 )
 
 func init() {
