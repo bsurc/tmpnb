@@ -18,4 +18,4 @@ USER $NB_USER
 
 WORKDIR $HOME
 
-COPY shell-novice-data.zip .
+RUN wget "http://swcarpentry.github.io/shell-novice/data/shell-novice-data.zip"
