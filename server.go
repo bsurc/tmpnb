@@ -356,6 +356,10 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				// properly after the authentication.
 				// TODO(kyle): if the path is /book/{{hash}}/, we need to handle if it
 				// exists or not, then report back.
+				//
+				// TODO(kyle): we should check the path if it is a book as well, and
+				// not let people without a valid session cookie get to another
+				// person's notebook.
 				switch u.Path {
 				case "/", "/about", "/list", "/privacy", "/stats":
 					break
