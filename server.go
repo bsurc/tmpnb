@@ -354,6 +354,8 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				// If the request is asking for some specific resource, and the user
 				// isn't authenticated, store the request state and try to redirect
 				// properly after the authentication.
+				// TODO(kyle): if the path is /book/{{hash}}/, we need to handle if it
+				// exists or not, then report back.
 				switch u.Path {
 				case "/", "/about", "/list", "/privacy", "/stats":
 					break
