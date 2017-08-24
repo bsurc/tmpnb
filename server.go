@@ -204,32 +204,32 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.Server = &http.Server{
 		Addr: sc.Port,
 	}
-	// OAuth
-	srv.sessions = map[string]*session{}
-	// FIXME(kyle): errors after we add files
-	apiToken, err := ioutil.ReadFile(filepath.Join(sc.AssetPath, "token"))
-	if err != nil {
-		return nil, err
-	}
-	srv.oauthToken = strings.TrimSpace(string(apiToken))
-	apiSecret, err := ioutil.ReadFile(filepath.Join(sc.AssetPath, "secret"))
-	if err != nil {
-		return nil, err
-	}
-	srv.oauthSecret = strings.TrimSpace(string(apiSecret))
-	// TODO(kyle): fix RedirectURL so we don't have to set it manually
-	srv.oauthConf = &oauth2.Config{
-		ClientID:     srv.oauthToken,
-		ClientSecret: srv.oauthSecret,
-		RedirectURL:  "http://127.0.0.1:8888/auth",
-		Scopes: []string{
-			"https://www.googleapis.com/auth/userinfo.email",
-		},
-		Endpoint: google.Endpoint,
-	}
-	srv.oauthState = newHash(defaultHashSize)
 	srv.enableOAuth = sc.OAuthConfig.RegExp != "" || len(sc.OAuthConfig.WhiteList) > 0
 	if srv.enableOAuth {
+		// OAuth
+		srv.sessions = map[string]*session{}
+		// FIXME(kyle): errors after we add files
+		apiToken, err := ioutil.ReadFile(filepath.Join(sc.AssetPath, "token"))
+		if err != nil {
+			return nil, err
+		}
+		srv.oauthToken = strings.TrimSpace(string(apiToken))
+		apiSecret, err := ioutil.ReadFile(filepath.Join(sc.AssetPath, "secret"))
+		if err != nil {
+			return nil, err
+		}
+		srv.oauthSecret = strings.TrimSpace(string(apiSecret))
+		// TODO(kyle): fix RedirectURL so we don't have to set it manually
+		srv.oauthConf = &oauth2.Config{
+			ClientID:     srv.oauthToken,
+			ClientSecret: srv.oauthSecret,
+			RedirectURL:  "http://127.0.0.1:8888/auth",
+			Scopes: []string{
+				"https://www.googleapis.com/auth/userinfo.email",
+			},
+			Endpoint: google.Endpoint,
+		}
+		srv.oauthState = newHash(defaultHashSize)
 		switch sc.OAuthConfig.RegExp {
 		case "bsu":
 			srv.oauthMatch = regexp.MustCompile(bsuRegexp)
