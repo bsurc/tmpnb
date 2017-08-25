@@ -86,20 +86,26 @@ var defaultConfig = serverConfig{
 }
 
 type session struct {
+	sync.Mutex
 	m     map[string]string
 	token *oauth2.Token
 }
 
 func newSession() *session {
-	return &session{make(map[string]string), nil}
+	return &session{m: make(map[string]string), token: nil}
 }
 
 func (s *session) get(key string) string {
-	return s.m[key]
+	s.Lock()
+	v := s.m[key]
+	s.Unlock()
+	return v
 }
 
 func (s *session) set(key, val string) {
+	s.Lock()
 	s.m[key] = val
+	s.Unlock()
 }
 
 // notebookServer handles the http tasks for the temporary notebooks.
@@ -473,7 +479,7 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 	srv.sessions[key].set("sub", u.Sub)
 	srv.sessions[key].set("email", u.Email)
 	srv.sessionMu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: sessionKey, Value: key, MaxAge: 0})
+	http.SetCookie(w, &http.Cookie{Name: sessionKey, Value: key, MaxAge: 2419200})
 	c, err := r.Cookie(redirectKey)
 	if err != nil {
 		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
