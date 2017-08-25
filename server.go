@@ -384,7 +384,7 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				// not let people without a valid session cookie get to another
 				// person's notebook.
 				switch u.Path {
-				case "/", "/about", "/list", "/privacy", "/stats":
+				case "/about", "/list", "/privacy", "/stats":
 					break
 				default:
 					key := newHash(defaultHashSize)
