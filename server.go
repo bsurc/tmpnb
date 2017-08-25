@@ -284,7 +284,6 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 	// Use the internal mux, it has deregister
 	srv.mux = new(ServeMux)
-	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
 	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
@@ -381,9 +380,6 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				// If the request is asking for some specific resource, and the user
 				// isn't authenticated, store the request state and try to redirect
 				// properly after the authentication.
-				// TODO(kyle): if the path is /book/{{hash}}/, we need to handle if it
-				// exists or not, then report back.
-				//
 				// TODO(kyle): we should check the path if it is a book as well, and
 				// not let people without a valid session cookie get to another
 				// person's notebook.
