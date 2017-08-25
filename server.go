@@ -70,6 +70,7 @@ type serverConfig struct {
 	MaxContainers     int           `json:"max_containers"`
 	Logfile           string        `json:"logfile"`
 	Port              string        `json:"port"`
+	Host              string        `json:"host"`
 	TLSCert           string        `json:"tls_cert"`
 	TLSKey            string        `json:"tls_key"`
 	OAuthConfig       struct {
@@ -219,11 +220,31 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			return nil, err
 		}
 		srv.oauthSecret = strings.TrimSpace(string(apiSecret))
-		// TODO(kyle): fix RedirectURL so we don't have to set it manually
+		// If we don't have a config hostname, try.  This doesn't use our cname, so
+		// the actual server name must be whitelisted in google.
+		if sc.Host == "" {
+			sc.Host, err = os.Hostname()
+			if err != nil {
+				log.Print(err)
+			}
+		}
+		rdu := url.URL{
+			Scheme: "https",
+			Host:   sc.Host,
+			Path:   "/auth",
+		}
+		// switch to http if not cert/key provided
+		if sc.TLSCert == "" || sc.TLSKey == "" {
+			rdu.Scheme = "http"
+		}
+		if sc.Port != "" {
+			rdu.Host += sc.Port
+		}
+		log.Printf("redirect: %s", rdu.String())
 		srv.oauthConf = &oauth2.Config{
 			ClientID:     srv.oauthToken,
 			ClientSecret: srv.oauthSecret,
-			RedirectURL:  "http://127.0.0.1:8888/auth",
+			RedirectURL:  rdu.String(),
 			Scopes: []string{
 				"https://www.googleapis.com/auth/userinfo.email",
 			},
