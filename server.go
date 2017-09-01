@@ -593,6 +593,19 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	email := ""
+	c, err := r.Cookie(sessionKey)
+	if err != nil {
+		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
+		return
+	}
+	srv.sessionMu.Lock()
+	s := srv.sessions[c.Value]
+	srv.sessionMu.Unlock()
+	if s != nil {
+		email = s.get("email")
+	}
+
 	var imageName = r.FormValue("image")
 	if imageName == "" {
 		imageName = defaultNotebook
@@ -612,7 +625,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 
 	_, pull := r.Form["pull"]
 
-	tmpnb, err := srv.pool.newNotebook(imageName, pull)
+	tmpnb, err := srv.pool.newNotebook(imageName, pull, email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		log.Print(err)
@@ -634,6 +647,26 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	handlerPath := path.Join("/book", tmpnb.hash) + "/"
 	log.Printf("handler: %s", handlerPath)
 	handler := func(w http.ResponseWriter, r *http.Request) {
+		// Read the cookie for session information and compare the
+		// email to the email provided by the tmpnb. If they match,
+		// allow access, else redirect them to /list
+		eMail := ""
+		c, err := r.Cookie(sessionKey)
+		if err != nil {
+			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
+			return
+		}
+		srv.sessionMu.Lock()
+		s := srv.sessions[c.Value]
+		srv.sessionMu.Unlock()
+		if s != nil {
+			eMail = s.get("email")
+		}
+		if eMail != tmpnb.userEmail {
+			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
+			return
+		}
+
 		tmpnb.Lock()
 		tmpnb.lastAccessed = time.Now()
 		tmpnb.Unlock()
