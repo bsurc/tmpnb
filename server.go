@@ -647,14 +647,10 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	handlerPath := path.Join("/book", tmpnb.hash) + "/"
 	log.Printf("handler: %s", handlerPath)
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		//BUG If a user provides a fictitious cookie that could
-		//represent another user, they could theoretically gain access
-		//to a notebook which does not belong to them.
-
-		//Read the cookie for session information and compare the
-		//email to the email provided by the tmpnb. If they match,
-		//allow access, else redirect them to /list
-		e := ""
+		// Read the cookie for session information and compare the
+		// email to the email provided by the tmpnb. If they match,
+		// allow access, else redirect them to /list
+		eMail := ""
 		c, err := r.Cookie(sessionKey)
 		if err != nil {
 			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
@@ -664,9 +660,9 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		s := srv.sessions[c.Value]
 		srv.sessionMu.Unlock()
 		if s != nil {
-			e = s.get("email")
+			eMail = s.get("email")
 		}
-		if e != tmpnb.userEmail {
+		if eMail != tmpnb.userEmail {
 			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
 			return
 		}
