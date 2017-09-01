@@ -56,6 +56,8 @@ type tempNotebook struct {
 	lastAccessed time.Time
 	// port is the passthrough port for the reverse proxy.
 	port int
+	// userEmail is the email of the user who created this container.
+	userEmail string
 }
 
 // notebookPool holds data regarding running notebooks.
@@ -167,7 +169,7 @@ func newHash(n int) string {
 }
 
 // newNotebook initializes and sets values for a new notebook.
-func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, error) {
+func (p *notebookPool) newNotebook(image string, pull bool, email string) (*tempNotebook, error) {
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
 	if err != nil {
@@ -248,6 +250,7 @@ func (p *notebookPool) newNotebook(image string, pull bool) (*tempNotebook, erro
 		imageName:    image,
 		lastAccessed: time.Now(),
 		port:         port,
+		userEmail:    email,
 	}
 	err = p.addNotebook(t)
 	if err != nil {
