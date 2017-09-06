@@ -109,6 +109,11 @@ func (s *session) set(key, val string) {
 }
 
 // notebookServer handles the http tasks for the temporary notebooks.
+//
+// XXX: note that larger configurations in the docker images, many files can be
+// opened.  You may need to set a higher ulimit for files on the server.  On a
+// server with ~60 open notebooks, ~20K files were opened.  Setting the limit
+// on the order of 1<<16 should be enough, I hope.
 type notebookServer struct {
 	// pool manages the containers
 	pool *notebookPool
