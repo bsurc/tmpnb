@@ -128,12 +128,12 @@ type notebookServer struct {
 	mux *ServeMux
 	// embed a server
 	*http.Server
-	// httpRedirect determines whether http redirects to https
-	httpRedirect bool
+	// HTTPRedirect determines whether http redirects to https
+	HTTPRedirect bool `json:"http_redirect"`
 	// TLS certificate path
-	tlsCert string
+	TLSCert string `json:"tls_cert"`
 	// TLS private key path
-	tlsKey string
+	TLSKey string `json:"tls_key"`
 	// html templates
 	templates *template.Template
 	// accessLogWriter is the access logging Writer
@@ -151,13 +151,10 @@ type notebookServer struct {
 	EnableDockerPush  bool          `json:"enable_docker_push"`
 	EnablePProf       bool          `json:"enable_pprof"`
 	ImageRegexp       string        `json:"image_regexp"`
-	HTTPRedirect      bool          `json:"http_redirect"`
 	MaxContainers     int           `json:"max_containers"`
 	Logfile           string        `json:"logfile"`
 	Port              string        `json:"port"`
 	Host              string        `json:"host"`
-	TLSCert           string        `json:"tls_cert"`
-	TLSKey            string        `json:"tls_key"`
 	OAuthConfig       struct {
 		WhiteList []string `json:"whitelist"`
 		RegExp    string   `json:"match"`
@@ -306,10 +303,6 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	}
 
 	srv.Handler = srv.mux
-
-	srv.tlsCert = srv.TLSCert
-	srv.tlsKey = srv.TLSKey
-	srv.httpRedirect = srv.HTTPRedirect
 
 	templateFiles, err := filepath.Glob(filepath.Join(srv.AssetPath, "templates", "*.html"))
 	if err != nil {
@@ -865,8 +858,8 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 
 // Start starts the http/s listener.
 func (srv *notebookServer) Start() {
-	if srv.tlsCert != "" && srv.tlsKey != "" {
-		if srv.httpRedirect {
+	if srv.TLSCert != "" && srv.TLSKey != "" {
+		if srv.HTTPRedirect {
 			httpServer := http.Server{}
 			httpMux := http.NewServeMux()
 			httpMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -882,7 +875,7 @@ func (srv *notebookServer) Start() {
 				log.Fatal(httpServer.ListenAndServe())
 			}()
 		}
-		log.Fatal(srv.ListenAndServeTLS(srv.tlsCert, srv.tlsKey))
+		log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
 	} else {
 		log.Fatal(srv.ListenAndServe())
 	}
