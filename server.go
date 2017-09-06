@@ -88,6 +88,11 @@ func (s *session) set(key, val string) {
 }
 
 // notebookServer handles the http tasks for the temporary notebooks.
+//
+// XXX: note that larger configurations in the docker images, many files can be
+// opened.  You may need to set a higher ulimit for files on the server.  On a
+// server with ~60 open notebooks, ~20K files were opened.  Setting the limit
+// on the order of 1<<16 should be enough, I hope.
 type notebookServer struct {
 	// pool manages the containers
 	pool *notebookPool
@@ -206,7 +211,10 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.token = tkn
 	srv.pool.token = tkn
 	srv.Server = &http.Server{
-		Addr: srv.Port,
+		Addr:         srv.Port,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 	srv.enableOAuth = srv.OAuthConfig.RegExp != "" || len(srv.OAuthConfig.WhiteList) > 0
 	if srv.enableOAuth {
@@ -641,6 +649,13 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			r.URL.Host = proxyURL.Host
 		},
 	}
+	// We may need to supply time outs:
+	/*
+		proxy.Transport = &http.Transport{
+			MaxIdleConns:    10,
+			IdleConnTimeout: 30 * time.Second,
+		}
+	*/
 	handlerPath := path.Join("/book", tmpnb.hash) + "/"
 	log.Printf("handler: %s", handlerPath)
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -839,13 +854,17 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", z.ID, strings.Join(z.Names, ","), z.Image, t)
 	}
 	tw.Flush()
+	// Dump the sock stats
+	pid := os.Getpid()
+	x, err := ioutil.ReadFile(filepath.Join("/proc", fmt.Sprintf("%d", pid), "net", "sockstat"))
+	if err == nil {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, string(x))
+	}
 }
 
 // Start starts the http/s listener.
 func (srv *notebookServer) Start() {
-	// Set the timeouts for the server
-	srv.ReadTimeout = 5 * time.Second
-	srv.WriteTimeout = 5 * time.Second
 	if srv.tlsCert != "" && srv.tlsKey != "" {
 		if srv.httpRedirect {
 			httpServer := http.Server{}
