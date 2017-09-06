@@ -58,28 +58,7 @@ func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
 
-// TODO(kyle): embed or add to notebookServer?
-type serverConfig struct {
-	AccessLogfile     string        `json:"access_logfile"`
-	AssetPath         string        `json:"asset_path"`
-	ContainerLifetime time.Duration `json:"container_lifetime"`
-	EnableDockerPush  bool          `json:"enable_docker_push"`
-	EnablePProf       bool          `json:"enable_pprof"`
-	ImageRegexp       string        `json:"image_regexp"`
-	HTTPRedirect      bool          `json:"http_redirect"`
-	MaxContainers     int           `json:"max_containers"`
-	Logfile           string        `json:"logfile"`
-	Port              string        `json:"port"`
-	Host              string        `json:"host"`
-	TLSCert           string        `json:"tls_cert"`
-	TLSKey            string        `json:"tls_key"`
-	OAuthConfig       struct {
-		WhiteList []string `json:"whitelist"`
-		RegExp    string   `json:"match"`
-	} `json:"oauth_confg"`
-}
-
-var defaultConfig = serverConfig{
+var defaultServer = notebookServer{
 	ContainerLifetime: defaultContainerLifetime,
 	ImageRegexp:       allImageMatch,
 	MaxContainers:     defaultMaxContainers,
@@ -159,33 +138,51 @@ type notebookServer struct {
 	// logWriter is the error logging Writer, the standard logger handles all
 	// others.
 	logWriter io.Writer
+
+	//Configuration options for the server
+	AccessLogfile     string        `json:"access_logfile"`
+	AssetPath         string        `json:"asset_path"`
+	ContainerLifetime time.Duration `json:"container_lifetime"`
+	EnableDockerPush  bool          `json:"enable_docker_push"`
+	EnablePProf       bool          `json:"enable_pprof"`
+	ImageRegexp       string        `json:"image_regexp"`
+	HTTPRedirect      bool          `json:"http_redirect"`
+	MaxContainers     int           `json:"max_containers"`
+	Logfile           string        `json:"logfile"`
+	Port              string        `json:"port"`
+	Host              string        `json:"host"`
+	TLSCert           string        `json:"tls_cert"`
+	TLSKey            string        `json:"tls_key"`
+	OAuthConfig       struct {
+		WhiteList []string `json:"whitelist"`
+		RegExp    string   `json:"match"`
+	} `json:"oauth_confg"`
 }
 
 // readConfig reads json config from r
-func readConfig(r io.Reader) (serverConfig, error) {
-	sc := defaultConfig
+func readConfig(r io.Reader) (*notebookServer, error) {
+	sc := defaultServer
 	err := json.NewDecoder(r).Decode(&sc)
-	return sc, err
+	return &sc, err
 }
 
 // newNotebookServer initializes a server and owned resources, using a
 // configuration if supplied.
 func newNotebookServer(config string) (*notebookServer, error) {
-	sc := defaultConfig
+	srv := &defaultServer
 	if config != "" {
 		fin, err := os.Open(config)
 		if err != nil {
 			return nil, err
 		}
-		sc, err = readConfig(fin)
+		srv, err = readConfig(fin)
 		if err != nil {
 			return nil, err
 		}
 	}
 	var err error
-	srv := &notebookServer{}
-	if sc.AccessLogfile != "" {
-		srv.accessLogWriter, err = os.OpenFile(sc.AccessLogfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
+	if srv.AccessLogfile != "" {
+		srv.accessLogWriter, err = os.OpenFile(srv.AccessLogfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 		if err != nil {
 			return nil, err
 		}
@@ -193,14 +190,14 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	} else {
 		srv.accessLog = log.New(os.Stdout, "ACCESS: ", log.LstdFlags|log.Lshortfile)
 	}
-	if sc.Logfile != "" {
-		srv.logWriter, err = os.OpenFile(sc.Logfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
+	if srv.Logfile != "" {
+		srv.logWriter, err = os.OpenFile(srv.Logfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 		if err != nil {
 			return nil, err
 		}
 		log.SetOutput(srv.logWriter)
 	}
-	p, err := newNotebookPool(sc.ImageRegexp, sc.MaxContainers, sc.ContainerLifetime)
+	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, srv.ContainerLifetime)
 	if err != nil {
 		return nil, err
 	}
@@ -209,42 +206,42 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.token = tkn
 	srv.pool.token = tkn
 	srv.Server = &http.Server{
-		Addr: sc.Port,
+		Addr: srv.Port,
 	}
-	srv.enableOAuth = sc.OAuthConfig.RegExp != "" || len(sc.OAuthConfig.WhiteList) > 0
+	srv.enableOAuth = srv.OAuthConfig.RegExp != "" || len(srv.OAuthConfig.WhiteList) > 0
 	if srv.enableOAuth {
 		// OAuth
 		srv.sessions = map[string]*session{}
 		// FIXME(kyle): errors after we add files
-		apiToken, err := ioutil.ReadFile(filepath.Join(sc.AssetPath, "token"))
+		apiToken, err := ioutil.ReadFile(filepath.Join(srv.AssetPath, "token"))
 		if err != nil {
 			return nil, err
 		}
 		srv.oauthToken = strings.TrimSpace(string(apiToken))
-		apiSecret, err := ioutil.ReadFile(filepath.Join(sc.AssetPath, "secret"))
+		apiSecret, err := ioutil.ReadFile(filepath.Join(srv.AssetPath, "secret"))
 		if err != nil {
 			return nil, err
 		}
 		srv.oauthSecret = strings.TrimSpace(string(apiSecret))
 		// If we don't have a config hostname, try.  This doesn't use our cname, so
 		// the actual server name must be whitelisted in google.
-		if sc.Host == "" {
-			sc.Host, err = os.Hostname()
+		if srv.Host == "" {
+			srv.Host, err = os.Hostname()
 			if err != nil {
 				log.Print(err)
 			}
 		}
 		rdu := url.URL{
 			Scheme: "https",
-			Host:   sc.Host,
+			Host:   srv.Host,
 			Path:   "/auth",
 		}
 		// switch to http if not cert/key provided
-		if sc.TLSCert == "" || sc.TLSKey == "" {
+		if srv.TLSCert == "" || srv.TLSKey == "" {
 			rdu.Scheme = "http"
 		}
-		if sc.Port != "" {
-			rdu.Host += sc.Port
+		if srv.Port != "" {
+			rdu.Host += srv.Port
 		}
 		log.Printf("redirect: %s", rdu.String())
 		srv.oauthConf = &oauth2.Config{
@@ -257,30 +254,30 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			Endpoint: google.Endpoint,
 		}
 		srv.oauthState = newHash(defaultHashSize)
-		switch sc.OAuthConfig.RegExp {
+		switch srv.OAuthConfig.RegExp {
 		case "bsu":
 			srv.oauthMatch = regexp.MustCompile(bsuRegexp)
 		case "":
 			break
 		default:
-			if srv.oauthMatch, err = regexp.Compile(sc.OAuthConfig.RegExp); err != nil {
+			if srv.oauthMatch, err = regexp.Compile(srv.OAuthConfig.RegExp); err != nil {
 				return nil, err
 			}
 		}
 	}
 	log.Println("OAuth2 whitelist:")
 	srv.oauthWhiteList = map[string]struct{}{}
-	for _, s := range sc.OAuthConfig.WhiteList {
+	for _, s := range srv.OAuthConfig.WhiteList {
 		srv.oauthWhiteList[s] = struct{}{}
 		log.Println(s)
 	}
 
 	srv.redirectMap = map[string]string{}
 
-	log.Println("OAuth2 regexp:", sc.OAuthConfig.RegExp)
+	log.Println("OAuth2 regexp:", srv.OAuthConfig.RegExp)
 
 	// Docker push support
-	srv.enableDockerPush = sc.EnableDockerPush
+	srv.enableDockerPush = srv.EnableDockerPush
 
 	// Use the internal mux, it has deregister
 	srv.mux = new(ServeMux)
@@ -290,10 +287,10 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
-	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(sc.AssetPath))))
+	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(srv.AssetPath))))
 	srv.mux.Handle("/stats", srv.accessLogHandler(http.HandlerFunc(srv.statsHandler)))
 	srv.mux.Handle("/status", srv.accessLogHandler(http.HandlerFunc(srv.statusHandler)))
-	if sc.EnablePProf {
+	if srv.EnablePProf {
 		srv.mux.Handle("/debug/pprof/", srv.accessLogHandler(http.HandlerFunc(pprof.Index)))
 		srv.mux.Handle("/debug/pprof/cmdline", srv.accessLogHandler(http.HandlerFunc(pprof.Cmdline)))
 		srv.mux.Handle("/debug/pprof/profile", srv.accessLogHandler(http.HandlerFunc(pprof.Profile)))
@@ -302,11 +299,11 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 	srv.Handler = srv.mux
 
-	srv.tlsCert = sc.TLSCert
-	srv.tlsKey = sc.TLSKey
-	srv.httpRedirect = sc.HTTPRedirect
+	srv.tlsCert = srv.TLSCert
+	srv.tlsKey = srv.TLSKey
+	srv.httpRedirect = srv.HTTPRedirect
 
-	templateFiles, err := filepath.Glob(filepath.Join(sc.AssetPath, "templates", "*.html"))
+	templateFiles, err := filepath.Glob(filepath.Join(srv.AssetPath, "templates", "*.html"))
 	if err != nil {
 		return nil, err
 	}
