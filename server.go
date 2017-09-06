@@ -128,12 +128,6 @@ type notebookServer struct {
 	mux *ServeMux
 	// embed a server
 	*http.Server
-	// HTTPRedirect determines whether http redirects to https
-	HTTPRedirect bool `json:"http_redirect"`
-	// TLS certificate path
-	TLSCert string `json:"tls_cert"`
-	// TLS private key path
-	TLSKey string `json:"tls_key"`
 	// html templates
 	templates *template.Template
 	// accessLogWriter is the access logging Writer
@@ -155,6 +149,9 @@ type notebookServer struct {
 	Logfile           string        `json:"logfile"`
 	Port              string        `json:"port"`
 	Host              string        `json:"host"`
+	HTTPRedirect      bool          `json:"http_redirect"`
+	TLSCert           string        `json:"tls_cert"`
+	TLSKey            string        `json:"tls_key"`
 	OAuthConfig       struct {
 		WhiteList []string `json:"whitelist"`
 		RegExp    string   `json:"match"`
