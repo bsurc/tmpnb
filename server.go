@@ -846,6 +846,9 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 
 // Start starts the http/s listener.
 func (srv *notebookServer) Start() {
+	// Set the timeouts for the server
+	srv.ReadTimeout = 5 * time.Second
+	srv.WriteTimeout = 5 * time.Second
 	if srv.tlsCert != "" && srv.tlsKey != "" {
 		if srv.httpRedirect {
 			httpServer := http.Server{}
