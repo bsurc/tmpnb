@@ -577,6 +577,9 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 found:
+	// Under load, sometimes the full image isn't ready for use, we wait one more
+	// time.
+	time.Sleep(2 * time.Second)
 	w.WriteHeader(status)
 }
 
