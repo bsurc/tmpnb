@@ -14,7 +14,6 @@ import (
 	"log"
 	"path"
 	"regexp"
-	"sort"
 	"sync"
 	"time"
 
@@ -61,28 +60,6 @@ type tempNotebook struct {
 	userEmail string
 }
 
-type notebookQueue struct {
-	mu sync.Mutex
-	q  []*tempNotebook
-}
-
-func (q *notebookQueue) Push(n *tempNotebook) {
-	q.mu.Lock()
-	q.q = append(q.q, n)
-	q.mu.Unlock()
-}
-
-func (q *notebookQueue) Pop() *tempNotebook {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if len(q.q) < 1 {
-		return nil
-	}
-	n := q.q[0]
-	q.q = q.q[1:]
-	return n
-}
-
 // notebookPool holds data regarding running notebooks.
 type notebookPool struct {
 	// guards the entire struct
@@ -95,17 +72,8 @@ type notebookPool struct {
 	// imageMatch filters available images by name
 	imageMatch *regexp.Regexp
 
-	// containerMap stores the contexts for the containers.
+	// containerMap is stores the contexts for the containers.
 	containerMap map[string]*tempNotebook
-
-	// enableReserve governs whether or not to use a reserve containers
-	enableReserve bool
-
-	// reserveMu guards the reserved notebooks
-	reserveMu sync.Mutex
-
-	// reserveMap stores a pre-created containers for quick start up
-	reserveMap map[string]*notebookQueue
 
 	// portSet holds free ports
 	portSet *portRange
@@ -174,25 +142,12 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		availableImages:   imageMap,
 		imageMatch:        imageMatch,
 		containerMap:      make(map[string]*tempNotebook),
-		enableReserve:     true,
-		reserveMap:        make(map[string]*notebookQueue),
 		portSet:           newPortRange(8000, maxContainers),
 		maxContainers:     maxContainers,
 		containerLifetime: lifetime,
 		killCollection:    make(chan struct{}),
 		deregisterMux:     make(chan string),
 	}
-	pool.reserveMu.Lock()
-	for k := range imageMap {
-		pool.reserveMap[k] = &notebookQueue{}
-		for i := 0; i < 2; i++ {
-			t, err := pool.createAndStartContainer(k, "", false)
-			if err == nil {
-				pool.reserveMap[k].Push(t)
-			}
-		}
-	}
-	pool.reserveMu.Unlock()
 	pool.startCollector(time.Duration(int64(lifetime) / collectionFraction))
 	pool.lastCollMu.Lock()
 	pool.lastCollection = time.Now()
@@ -213,13 +168,15 @@ func newHash(n int) string {
 	return fmt.Sprintf("%x", b)
 }
 
-func (p *notebookPool) createAndStartContainer(image, email string, pull bool) (*tempNotebook, error) {
+// newNotebook initializes and sets values for a new notebook.
+func (p *notebookPool) newNotebook(image string, pull bool, email string) (*tempNotebook, error) {
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
 	if err != nil {
 		log.Print(err)
 		return nil, err
 	}
+
 	// TODO(kyle): possibly provide tag support
 	if pull {
 		log.Printf("pulling container %s", image)
@@ -241,12 +198,15 @@ func (p *notebookPool) createAndStartContainer(image, email string, pull bool) (
 			log.Print(ps.Progress)
 		}
 	}
+
 	hash := newHash(defaultHashSize)
+
 	port, err := p.portSet.Acquire()
 	if err != nil {
 		return nil, err
 	}
 	portString := fmt.Sprintf("%d", port)
+
 	var pSet = nat.PortSet{}
 	pt, err := nat.NewPort("tcp", portString)
 	pSet[pt] = struct{}{}
@@ -268,14 +228,17 @@ func (p *notebookPool) createAndStartContainer(image, email string, pull bool) (
 		Image:        image,
 		ExposedPorts: pSet,
 	}
+
 	hostConfig := container.HostConfig{
 		NetworkMode: "host",
 	}
+
 	resp, err := cli.ContainerCreate(ctx, &containerConfig, &hostConfig, nil, "")
 	if err != nil {
 		p.portSet.Drop(port)
 		return nil, err
 	}
+
 	if err := cli.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
 		p.portSet.Drop(port)
 		return nil, err
@@ -289,56 +252,13 @@ func (p *notebookPool) createAndStartContainer(image, email string, pull bool) (
 		port:         port,
 		userEmail:    email,
 	}
-	return t, nil
-}
-
-// newNotebook initializes and sets values for a new notebook.
-func (p *notebookPool) newNotebook(image, email string, pull bool) (*tempNotebook, error) {
-	var t *tempNotebook
-	var err error
-	if !p.enableReserve {
-		t, err = p.createAndStartContainer(image, email, pull)
-	} else {
-		p.reserveMu.Lock()
-		q := p.reserveMap[image]
-		t = q.Pop()
-		p.reserveMu.Unlock()
-		if t == nil {
-			t, err = p.createAndStartContainer(image, email, pull)
-			go func() {
-				c := 1
-				nbs := p.activeNotebooks()
-				for _, n := range nbs {
-					if n.imageName == image {
-						c++
-						if c >= 7 {
-							break
-						}
-					}
-				}
-				log.Printf("found %d running containers for image %s", c, image)
-				for i := 0; i < c; i++ {
-					log.Printf("creating a new reserve container (%s)", image)
-					r, err := p.createAndStartContainer(image, "", false)
-					if err == nil {
-						p.reserveMu.Lock()
-						q := p.reserveMap[image]
-						q.Push(r)
-						p.reserveMu.Unlock()
-					}
-				}
-			}()
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	t.userEmail = email
 	err = p.addNotebook(t)
 	if err != nil {
+		log.Print(err)
+		p.portSet.Drop(port)
 		return nil, err
 	}
-	return t, err
+	return t, nil
 }
 
 // size returns the size of the containerMap with appropriate locks
@@ -404,27 +324,6 @@ func (p *notebookPool) activeNotebooks() []tempNotebook {
 	return nbs
 }
 
-func (p *notebookPool) queuedNotebooks() []tempNotebook {
-	nbs := []tempNotebook{}
-	p.reserveMu.Lock()
-	for _, v := range p.reserveMap {
-		for _, nb := range v.q {
-			nbs = append(nbs, tempNotebook{
-				id:           nb.id,
-				hash:         nb.hash,
-				imageName:    nb.imageName,
-				lastAccessed: nb.lastAccessed,
-				port:         nb.port,
-			})
-		}
-	}
-	p.reserveMu.Unlock()
-	sort.Slice(nbs, func(i, j int) bool {
-		return nbs[i].imageName < nbs[j].imageName
-	})
-	return nbs
-}
-
 // zombieNotebooks queries docker for containers that aren't under our
 // supervision.  These can block ports assigned to our containers.
 func (p *notebookPool) zombieContainers() ([]types.Container, error) {
@@ -435,14 +334,6 @@ func (p *notebookPool) zombieContainers() ([]types.Container, error) {
 		ids[c.id] = struct{}{}
 	}
 	p.Unlock()
-	// reserve notebooks too
-	p.reserveMu.Lock()
-	for _, v := range p.reserveMap {
-		for _, c := range v.q {
-			ids[c.id] = struct{}{}
-		}
-	}
-	p.reserveMu.Unlock()
 	cli, err := client.NewEnvClient()
 	opts := types.ContainerListOptions{}
 	containers, err := cli.ContainerList(context.Background(), opts)
@@ -495,7 +386,7 @@ func (p *notebookPool) stopCollector() {
 
 // releaseContainers checks for expired containers and frees them from the
 // containerMap.  It also frees the port in the portSet.  If force is true, age
-// is ignored, and the reserve pool is drained.
+// is ignored.
 func (p *notebookPool) releaseContainers(force, async bool) error {
 	p.Lock()
 	trash := []tempNotebook{}
@@ -504,6 +395,7 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 		age := time.Now().Sub(c.lastAccessed)
 		if age.Seconds() > p.containerLifetime.Seconds() || force {
 			log.Printf("age: %v\n", age)
+			//trash = append(trash, *c)
 			trash = append(trash, tempNotebook{
 				id:           c.id,
 				hash:         c.hash,
@@ -515,23 +407,6 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 		c.Unlock()
 	}
 	p.Unlock()
-
-	if force {
-		p.reserveMu.Lock()
-		for _, v := range p.reserveMap {
-			for _, c := range v.q {
-				trash = append(trash, tempNotebook{
-					id:           c.id,
-					hash:         c.hash,
-					imageName:    c.imageName,
-					lastAccessed: c.lastAccessed,
-					port:         c.port,
-				})
-			}
-		}
-		p.reserveMu.Unlock()
-	}
-
 	for i := 0; i < len(trash); i++ {
 		type nbCopy struct {
 			id           string

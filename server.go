@@ -623,7 +623,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 
 	_, pull := r.Form["pull"]
 
-	tmpnb, err := srv.pool.newNotebook(imageName, email, pull)
+	tmpnb, err := srv.pool.newNotebook(imageName, pull, email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		log.Print(err)
@@ -839,16 +839,6 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
-
-	qnbs := srv.pool.queuedNotebooks()
-	fmt.Fprintf(w, "Queued Notebooks:\n")
-	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\tExpires in\n")
-	for i := 0; i < len(qnbs); i++ {
-		fmt.Fprintf(tw, "%s\t%s\t\n", qnbs[i].hash[:8], qnbs[i].imageName)
-	}
-	tw.Flush()
-	fmt.Fprintln(w)
-
 	fmt.Fprintf(w, "Zombie Containers:\n")
 	fmt.Fprintf(w, "ID\tNames\tImage\tCreated\n")
 	zombies, _ := srv.pool.zombieContainers()
