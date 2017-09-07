@@ -66,10 +66,12 @@ type notebookQueue struct {
 	q  []*tempNotebook
 }
 
-func (q *notebookQueue) Push(n *tempNotebook) {
+func (q *notebookQueue) Push(n *tempNotebook) int {
 	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.q = append(q.q, n)
-	q.mu.Unlock()
+	c := len(q.q)
+	return c
 }
 
 func (q *notebookQueue) Pop() *tempNotebook {
@@ -80,6 +82,14 @@ func (q *notebookQueue) Pop() *tempNotebook {
 	}
 	n := q.q[0]
 	q.q = q.q[1:]
+	n.lastAccessed = time.Now()
+	return n
+}
+
+func (q *notebookQueue) Len() int {
+	q.mu.Lock()
+	n := len(q.q)
+	q.mu.Unlock()
 	return n
 }
 
@@ -306,27 +316,27 @@ func (p *notebookPool) newNotebook(image, email string, pull bool) (*tempNoteboo
 		if t == nil {
 			t, err = p.createAndStartContainer(image, email, pull)
 			go func() {
-				c := 1
+				// count the number of running containers with the image name
+				c := 0
 				nbs := p.activeNotebooks()
 				for _, n := range nbs {
 					if n.imageName == image {
 						c++
-						if c >= 7 {
-							break
-						}
 					}
 				}
-				log.Printf("found %d running containers for image %s", c, image)
-				for i := 0; i < c; i++ {
+				if c > 8 {
+					c = 8
+				}
+				p.reserveMu.Lock()
+				q := p.reserveMap[image]
+				for i := q.Len(); i < c; i++ {
 					log.Printf("creating a new reserve container (%s)", image)
 					r, err := p.createAndStartContainer(image, "", false)
 					if err == nil {
-						p.reserveMu.Lock()
-						q := p.reserveMap[image]
 						q.Push(r)
-						p.reserveMu.Unlock()
 					}
 				}
+				p.reserveMu.Unlock()
 			}()
 		}
 	}
