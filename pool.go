@@ -335,9 +335,6 @@ func (p *notebookPool) newNotebook(image, email string, pull bool) (*tempNoteboo
 	}
 	t.userEmail = email
 	err = p.addNotebook(t)
-	if err != nil {
-		return nil, err
-	}
 	return t, err
 }
 
