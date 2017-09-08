@@ -332,6 +332,7 @@ func (p *notebookPool) newNotebook(image, email string, pull bool) (*tempNoteboo
 				if c > p.maxReserve {
 					c = p.maxReserve
 				}
+				// FIXME(kyle): check total limits here, don't go over maxContainers
 				p.reserveMu.Lock()
 				q := p.reserveMap[image]
 				for i := q.Len(); i < c; i++ {
