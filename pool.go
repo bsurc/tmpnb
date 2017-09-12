@@ -515,6 +515,7 @@ func (p *notebookPool) stopCollector() {
 func (p *notebookPool) releaseContainers(force, async bool) error {
 	p.Lock()
 	trash := []tempNotebook{}
+	alive := 0
 	for _, c := range p.containerMap {
 		c.Lock()
 		age := time.Now().Sub(c.lastAccessed)
@@ -527,15 +528,17 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 				lastAccessed: c.lastAccessed,
 				port:         c.port,
 			})
+		} else {
+			alive++
 		}
 		c.Unlock()
 	}
 	p.Unlock()
 
-	if force {
+	if force || alive < 1 {
 		p.reserveMu.Lock()
 		for _, v := range p.reserveMap {
-			for _, c := range v.q {
+			for c := v.Pop(); c != nil; c = v.Pop() {
 				trash = append(trash, tempNotebook{
 					id:           c.id,
 					hash:         c.hash,
