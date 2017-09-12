@@ -139,20 +139,21 @@ type notebookServer struct {
 	logWriter io.Writer
 
 	//Configuration options for the server
-	AccessLogfile     string        `json:"access_logfile"`
-	AssetPath         string        `json:"asset_path"`
-	ContainerLifetime time.Duration `json:"container_lifetime"`
-	EnableDockerPush  bool          `json:"enable_docker_push"`
-	EnablePProf       bool          `json:"enable_pprof"`
-	ImageRegexp       string        `json:"image_regexp"`
-	MaxContainers     int           `json:"max_containers"`
-	Logfile           string        `json:"logfile"`
-	Port              string        `json:"port"`
-	Host              string        `json:"host"`
-	HTTPRedirect      bool          `json:"http_redirect"`
-	TLSCert           string        `json:"tls_cert"`
-	TLSKey            string        `json:"tls_key"`
-	OAuthConfig       struct {
+	AccessLogfile      string        `json:"access_logfile"`
+	AssetPath          string        `json:"asset_path"`
+	ContainerLifetime  time.Duration `json:"container_lifetime"`
+	DisableJupyterAuth bool          `json:"disable_jupyter_auth"`
+	EnableDockerPush   bool          `json:"enable_docker_push"`
+	EnablePProf        bool          `json:"enable_pprof"`
+	ImageRegexp        string        `json:"image_regexp"`
+	MaxContainers      int           `json:"max_containers"`
+	Logfile            string        `json:"logfile"`
+	Port               string        `json:"port"`
+	Host               string        `json:"host"`
+	HTTPRedirect       bool          `json:"http_redirect"`
+	TLSCert            string        `json:"tls_cert"`
+	TLSKey             string        `json:"tls_key"`
+	OAuthConfig        struct {
 		WhiteList []string `json:"whitelist"`
 		RegExp    string   `json:"match"`
 	} `json:"oauth_confg"`
@@ -210,6 +211,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
+	srv.pool.disableJupyterAuth = srv.DisableJupyterAuth
 	srv.enableOAuth = srv.OAuthConfig.RegExp != "" || len(srv.OAuthConfig.WhiteList) > 0
 	if srv.enableOAuth {
 		// OAuth
