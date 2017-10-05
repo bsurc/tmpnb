@@ -321,20 +321,21 @@ func (p *notebookPool) saveImage(c nbCopy, image string) error {
 	cj, err := cli.ContainerInspect(ctx, c.id)
 	_ = cj
 	opts := types.ContainerCommitOptions{
-		Reference: c.imageName,
+		Reference: image,
 		Comment:   fmt.Sprintf("%s|%s", c.email, time.Now()),
 		Author:    c.email,
 		Changes:   []string{},
 		Pause:     true,
-		Config: &container.Config{
-			Image: image,
-		},
+		Config:    &container.Config{},
 	}
 	id, err := cli.ContainerCommit(ctx, c.id, opts)
 	_ = id
 	if err != nil {
 		return err
 	}
+	p.Lock()
+	p.availableImages[image] = struct{}{}
+	p.Unlock()
 	return nil
 }
 
@@ -486,17 +487,12 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 			// overwrite it.  If it doesn't create a new image name.  make it the
 			// original image name, with a tag of the users email.
 			if p.persistent && c.email != "" {
-				p.persistentMu.Lock()
-				image, ok := p.persistentMap[c.email]
-				if !ok {
-					image = c.imageName + ":" + strings.Split(c.email, "@")[0]
-				}
-				log.Printf("attempting to save container %s last accessed at %v", c.id, c.lastAccessed)
+				image := strings.Split(c.imageName, ":")[0] + ":" + strings.Split(c.email, "@")[0]
+				log.Printf("attempting to save container %s last accessed at %v as %s", c.id, c.lastAccessed, image)
 				err := p.saveImage(c, image)
 				if err != nil {
 					log.Print(err)
 				}
-				p.persistentMu.Unlock()
 			} else {
 				log.Println(p.persistent, c.email)
 			}
