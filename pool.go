@@ -271,25 +271,18 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*temp
 	return t, nil
 }
 
-// size returns the size of the containerMap with appropriate locks
-func (p *notebookPool) size() int {
-	p.Lock()
-	n := len(p.containerMap)
-	p.Unlock()
-	return n
-}
-
 // addNotebook adds a tempNotebook to the containerMap, if there is room.
 func (p *notebookPool) addNotebook(t *tempNotebook) error {
-	n := p.size()
+
+	p.Lock()
+	n := len(p.containerMap)
 	log.Printf("pool size: %d of %d", n+1, p.maxContainers)
-	if p.size()+1 > p.maxContainers {
+	if n+1 > p.maxContainers {
 		p.releaseContainers(false, true)
 	}
-	if p.size()+1 > p.maxContainers {
+	if n+1 > p.maxContainers {
 		return errNotebookPoolFull
 	}
-	p.Lock()
 	p.containerMap[t.hash] = t
 	p.Unlock()
 	return nil
@@ -316,8 +309,9 @@ func (p *notebookPool) stopAndKillContainer(id string) {
 // activeNotebooks fetchs copies of the tempNotebooks and returns them as a
 // slice.  The lock is obviously invalid.
 func (p *notebookPool) activeNotebooks() []tempNotebook {
-	nbs := make([]tempNotebook, p.size())
 	p.Lock()
+	n := len(p.containerMap)
+	nbs := make([]tempNotebook, n)
 	i := 0
 	for k := range p.containerMap {
 		c := p.containerMap[k]
