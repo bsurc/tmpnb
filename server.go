@@ -149,6 +149,7 @@ type notebookServer struct {
 	MaxContainers      int           `json:"max_containers"`
 	Logfile            string        `json:"logfile"`
 	Port               string        `json:"port"`
+	Persistant         bool          `json:"persistent"`
 	Host               string        `json:"host"`
 	HTTPRedirect       bool          `json:"http_redirect"`
 	TLSCert            string        `json:"tls_cert"`
@@ -197,7 +198,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		}
 		log.SetOutput(srv.logWriter)
 	}
-	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, srv.ContainerLifetime)
+	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, srv.ContainerLifetime, srv.Persistant)
 	if err != nil {
 		return nil, err
 	}
@@ -657,7 +658,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		// Read the cookie for session information and compare the
 		// email to the email provided by the tmpnb. If they match,
 		// allow access, else redirect them to /list
-		eMail := ""
+		email := ""
 		c, err := r.Cookie(sessionKey)
 		if err != nil {
 			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
@@ -667,9 +668,9 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		s := srv.sessions[c.Value]
 		srv.sessionMu.Unlock()
 		if s != nil {
-			eMail = s.get("email")
+			email = s.get("email")
 		}
-		if eMail != tmpnb.userEmail {
+		if email != tmpnb.email {
 			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
 			return
 		}

@@ -1,6 +1,6 @@
 {
   "asset_path": "./assets",
-  "container_lifetime": 60000000000,
+  "container_lifetime": 20000000000,
   "disable_jupyter_auth": false,
   "enable_docker_push": true,
   "enable_pprof": true,
@@ -9,12 +9,14 @@
   "logfile": "",
   "max_containers": 100,
   "http_redirect": false,
+  "persistent": true,
   "port": ":8888",
   "host": "127.0.0.1",
   "tls_cert": "",
   "tls_key": "",
   "oauth_confg": {
     "whitelist": [
+      "kyleshannon@boisestate.edu"
     ],
     "match": ""
   }

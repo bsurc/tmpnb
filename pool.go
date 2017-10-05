@@ -14,6 +14,7 @@ import (
 	"log"
 	"path"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,8 +57,8 @@ type tempNotebook struct {
 	lastAccessed time.Time
 	// port is the passthrough port for the reverse proxy.
 	port int
-	// userEmail is the email of the user who created this container.
-	userEmail string
+	// email is the email of the user who created this container.
+	email string
 }
 
 // notebookPool holds data regarding running notebooks.
@@ -74,6 +75,17 @@ type notebookPool struct {
 
 	// containerMap is stores the contexts for the containers.
 	containerMap map[string]*tempNotebook
+
+	// persisent allows changes to be stored in new docker images for continued
+	// use.
+	persistent bool
+
+	// persistentMu guards the persistentMap
+	persistentMu sync.Mutex
+
+	// persistantMap has an email for a key, and an image name for a value.  This
+	// allows user to spawn saved containers.
+	persistentMap map[string]string
 
 	// portSet holds free ports
 	portSet *portRange
@@ -111,7 +123,7 @@ var errNotebookPoolFull = errors.New("container pool hit max size limit")
 
 // newNotebookPool creates a notebookPool and sets defaults, overriding some
 // with passed arguments.
-func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Duration) (*notebookPool, error) {
+func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Duration, persistent bool) (*notebookPool, error) {
 	if imageRegexp == "" {
 		imageRegexp = jupyterNotebookImageMatch
 	}
@@ -145,6 +157,8 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		availableImages:   imageMap,
 		imageMatch:        imageMatch,
 		containerMap:      make(map[string]*tempNotebook),
+		persistent:        persistent,
+		persistentMap:     map[string]string{},
 		portSet:           newPortRange(8000, maxContainers),
 		maxContainers:     maxContainers,
 		containerLifetime: lifetime,
@@ -260,7 +274,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*temp
 		imageName:    image,
 		lastAccessed: time.Now(),
 		port:         port,
-		userEmail:    email,
+		email:        email,
 	}
 	err = p.addNotebook(t)
 	if err != nil {
@@ -273,7 +287,6 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*temp
 
 // addNotebook adds a tempNotebook to the containerMap, if there is room.
 func (p *notebookPool) addNotebook(t *tempNotebook) error {
-
 	p.Lock()
 	n := len(p.containerMap)
 	log.Printf("pool size: %d of %d", n+1, p.maxContainers)
@@ -285,6 +298,43 @@ func (p *notebookPool) addNotebook(t *tempNotebook) error {
 	}
 	p.containerMap[t.hash] = t
 	p.Unlock()
+	return nil
+}
+
+// nbCopy holds metadata about a notebook, it can't be locked.
+type nbCopy struct {
+	id           string
+	hash         string
+	imageName    string
+	lastAccessed time.Time
+	port         int
+	email        string
+}
+
+func (p *notebookPool) saveImage(c nbCopy, image string) error {
+	cli, err := client.NewEnvClient()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	// Get the container info
+	cj, err := cli.ContainerInspect(ctx, c.id)
+	_ = cj
+	opts := types.ContainerCommitOptions{
+		Reference: c.imageName,
+		Comment:   fmt.Sprintf("%s|%s", c.email, time.Now()),
+		Author:    c.email,
+		Changes:   []string{},
+		Pause:     true,
+		Config: &container.Config{
+			Image: image,
+		},
+	}
+	id, err := cli.ContainerCommit(ctx, c.id, opts)
+	_ = id
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -406,30 +456,25 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 				imageName:    c.imageName,
 				lastAccessed: c.lastAccessed,
 				port:         c.port,
+				email:        c.email,
 			})
 		}
 		c.Unlock()
 	}
 	p.Unlock()
 	for i := 0; i < len(trash); i++ {
-		type nbCopy struct {
-			id           string
-			hash         string
-			imageName    string
-			lastAccessed time.Time
-			port         int
-		}
 		c := nbCopy{
 			id:           trash[i].id,
 			hash:         trash[i].hash,
 			imageName:    trash[i].imageName,
 			lastAccessed: trash[i].lastAccessed,
 			port:         trash[i].port,
+			email:        trash[i].email,
 		}
+		log.Println(c.email)
 		f := func(c nbCopy) {
-			log.Printf("attempting to release container %s last accessed at %v", c.id, c.lastAccessed)
-			p.stopAndKillContainer(c.id)
-			p.portSet.Drop(c.port)
+			// Get the hash out of the map as soon as possible, then it's unreachable
+			// by the server and we don't have to worry about messy access
 			p.Lock()
 			delete(p.containerMap, c.hash)
 			p.Unlock()
@@ -437,6 +482,27 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 			// before, but now we can with the vendored/updated copy in mux.go.  We add
 			// a trailing slash when we register the path, so we must add it here too.
 			p.deregisterMux <- path.Join("/book", c.hash) + "/"
+			// If we are saving the image, check and see if it exists.  If it does,
+			// overwrite it.  If it doesn't create a new image name.  make it the
+			// original image name, with a tag of the users email.
+			if p.persistent && c.email != "" {
+				p.persistentMu.Lock()
+				image, ok := p.persistentMap[c.email]
+				if !ok {
+					image = c.imageName + ":" + strings.Split(c.email, "@")[0]
+				}
+				log.Printf("attempting to save container %s last accessed at %v", c.id, c.lastAccessed)
+				err := p.saveImage(c, image)
+				if err != nil {
+					log.Print(err)
+				}
+				p.persistentMu.Unlock()
+			} else {
+				log.Println(p.persistent, c.email)
+			}
+			log.Printf("attempting to release container %s last accessed at %v", c.id, c.lastAccessed)
+			p.stopAndKillContainer(c.id)
+			p.portSet.Drop(c.port)
 		}
 		if async {
 			go f(c)
