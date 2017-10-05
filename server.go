@@ -833,20 +833,20 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		b := nbs[j].lastAccessed
 		return a.Before(b)
 	})
-	fmt.Fprintf(w, "All Notebooks:\n")
-	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\tExpires in\n")
+	fmt.Fprintf(w, "all notebooks:\n")
+	fmt.Fprintf(tw, "hash prefix\tdocker id\timage name\tlast accessed\texpires in\n")
 	for i := 0; i < len(nbs); i++ {
 		e := time.Until(nbs[i].lastAccessed.Add(srv.pool.containerLifetime))
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", nbs[i].hash[:8], nbs[i].imageName, nbs[i].lastAccessed, e)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", nbs[i].hash[:8], nbs[i].id[:8], nbs[i].imageName, nbs[i].lastAccessed, e)
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Zombie Containers:\n")
-	fmt.Fprintf(w, "ID\tNames\tImage\tCreated\n")
+	fmt.Fprintf(tw, "zombies:\n")
+	fmt.Fprintf(tw, "docker id\tnames\timage\tcreated\n")
 	zombies, _ := srv.pool.zombieContainers()
 	for _, z := range zombies {
 		t := time.Unix(z.Created, 0)
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", z.ID, strings.Join(z.Names, ","), z.Image, t)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", z.ID[:8], strings.Join(z.Names, ","), z.Image, t)
 	}
 	tw.Flush()
 	// Dump the sock stats
