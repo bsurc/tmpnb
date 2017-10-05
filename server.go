@@ -475,14 +475,14 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 	http.SetCookie(w, &http.Cookie{Name: sessionKey, Value: key, MaxAge: 2419200})
 	c, err := r.Cookie(redirectKey)
 	if err != nil {
-		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
+		http.Redirect(w, r, "/list", http.StatusInternalServerError)
 		return
 	}
 	srv.redirectMu.Lock()
 	uri, ok := srv.redirectMap[c.Value]
 	srv.redirectMu.Unlock()
 	if !ok {
-		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
+		http.Redirect(w, r, "/list", http.StatusInternalServerError)
 		return
 	}
 	log.Printf("using custom redirect %s", r.RequestURI)
@@ -594,16 +594,18 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	email := ""
-	c, err := r.Cookie(sessionKey)
-	if err != nil {
-		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-		return
-	}
-	srv.sessionMu.Lock()
-	s := srv.sessions[c.Value]
-	srv.sessionMu.Unlock()
-	if s != nil {
-		email = s.get("email")
+	if srv.enableOAuth {
+		c, err := r.Cookie(sessionKey)
+		if err != nil {
+			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
+			return
+		}
+		srv.sessionMu.Lock()
+		s := srv.sessions[c.Value]
+		srv.sessionMu.Unlock()
+		if s != nil {
+			email = s.get("email")
+		}
 	}
 
 	var imageName = r.FormValue("image")
@@ -657,21 +659,23 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		// Read the cookie for session information and compare the
 		// email to the email provided by the tmpnb. If they match,
 		// allow access, else redirect them to /list
-		eMail := ""
-		c, err := r.Cookie(sessionKey)
-		if err != nil {
-			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-			return
-		}
-		srv.sessionMu.Lock()
-		s := srv.sessions[c.Value]
-		srv.sessionMu.Unlock()
-		if s != nil {
-			eMail = s.get("email")
-		}
-		if eMail != tmpnb.userEmail {
-			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-			return
+		if srv.enableOAuth {
+			email := ""
+			c, err := r.Cookie(sessionKey)
+			if err != nil {
+				http.Redirect(w, r, "/list", http.StatusUnauthorized)
+				return
+			}
+			srv.sessionMu.Lock()
+			s := srv.sessions[c.Value]
+			srv.sessionMu.Unlock()
+			if s != nil {
+				email = s.get("email")
+			}
+			if email != tmpnb.userEmail {
+				http.Redirect(w, r, "/list", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		tmpnb.Lock()
