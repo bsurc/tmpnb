@@ -475,14 +475,14 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 	http.SetCookie(w, &http.Cookie{Name: sessionKey, Value: key, MaxAge: 2419200})
 	c, err := r.Cookie(redirectKey)
 	if err != nil {
-		http.Redirect(w, r, "/list", http.StatusInternalServerError)
+		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
 		return
 	}
 	srv.redirectMu.Lock()
 	uri, ok := srv.redirectMap[c.Value]
 	srv.redirectMu.Unlock()
 	if !ok {
-		http.Redirect(w, r, "/list", http.StatusInternalServerError)
+		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
 		return
 	}
 	log.Printf("using custom redirect %s", r.RequestURI)
