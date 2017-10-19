@@ -389,7 +389,13 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 					srv.redirectMap[key] = r.RequestURI
 					srv.redirectMu.Unlock()
 					const redirectExpire = 60
-					http.SetCookie(w, &http.Cookie{Name: redirectKey, Value: key, MaxAge: redirectExpire})
+					http.SetCookie(w, &http.Cookie{
+						Name:     redirectKey,
+						Value:    key,
+						MaxAge:   redirectExpire,
+						HttpOnly: true,
+					})
+
 					// Delete the key after 2 * redirectExpire.  This ensures that the
 					// map is cleared, even if the key is never used.  We could do it
 					// right after it's used, but if something goes wrong, or the user
@@ -472,7 +478,12 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 	srv.sessions[key].set("sub", u.Sub)
 	srv.sessions[key].set("email", u.Email)
 	srv.sessionMu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: sessionKey, Value: key, MaxAge: 2419200})
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionKey,
+		Value:    key,
+		MaxAge:   2419200,
+		HttpOnly: true,
+	})
 	c, err := r.Cookie(redirectKey)
 	if err != nil {
 		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
@@ -562,11 +573,16 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 	log.Printf("ping target: %s", pingURL.String())
 	var resp *http.Response
 	status := http.StatusNotFound
-	for i := 0; i < 10; i++ {
+	// Wait for the container to boot up.  If docker is 'cold', this can take a
+	// bit.  The maximum wait time here is 32 seconds.  If it doesn't start by
+	// then, it's probably not going to start.
+	sleep := time.Millisecond * 500
+	for i := 0; i < 6; i++ {
 		resp, err = http.Get(pingURL.String())
 		if err != nil {
 			log.Printf("ping failed: %s (attempt %d)", err, i)
-			time.Sleep(2 * time.Second)
+			time.Sleep(sleep)
+			sleep *= 2
 			continue
 		}
 		resp.Body.Close()
@@ -594,16 +610,18 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	email := ""
-	c, err := r.Cookie(sessionKey)
-	if err != nil {
-		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-		return
-	}
-	srv.sessionMu.Lock()
-	s := srv.sessions[c.Value]
-	srv.sessionMu.Unlock()
-	if s != nil {
-		email = s.get("email")
+	if srv.enableOAuth {
+		c, err := r.Cookie(sessionKey)
+		if err != nil {
+			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
+			return
+		}
+		srv.sessionMu.Lock()
+		s := srv.sessions[c.Value]
+		srv.sessionMu.Unlock()
+		if s != nil {
+			email = s.get("email")
+		}
 	}
 
 	var imageName = r.FormValue("image")
@@ -657,21 +675,23 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		// Read the cookie for session information and compare the
 		// email to the email provided by the tmpnb. If they match,
 		// allow access, else redirect them to /list
-		eMail := ""
-		c, err := r.Cookie(sessionKey)
-		if err != nil {
-			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-			return
-		}
-		srv.sessionMu.Lock()
-		s := srv.sessions[c.Value]
-		srv.sessionMu.Unlock()
-		if s != nil {
-			eMail = s.get("email")
-		}
-		if eMail != tmpnb.userEmail {
-			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-			return
+		if srv.enableOAuth {
+			email := ""
+			c, err := r.Cookie(sessionKey)
+			if err != nil {
+				http.Redirect(w, r, "/list", http.StatusUnauthorized)
+				return
+			}
+			srv.sessionMu.Lock()
+			s := srv.sessions[c.Value]
+			srv.sessionMu.Unlock()
+			if s != nil {
+				email = s.get("email")
+			}
+			if email != tmpnb.userEmail {
+				http.Redirect(w, r, "/list", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		tmpnb.Lock()
