@@ -389,7 +389,13 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 					srv.redirectMap[key] = r.RequestURI
 					srv.redirectMu.Unlock()
 					const redirectExpire = 60
-					http.SetCookie(w, &http.Cookie{Name: redirectKey, Value: key, MaxAge: redirectExpire})
+					http.SetCookie(w, &http.Cookie{
+						Name:     redirectKey,
+						Value:    key,
+						MaxAge:   redirectExpire,
+						HttpOnly: true,
+					})
+
 					// Delete the key after 2 * redirectExpire.  This ensures that the
 					// map is cleared, even if the key is never used.  We could do it
 					// right after it's used, but if something goes wrong, or the user
@@ -472,7 +478,12 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 	srv.sessions[key].set("sub", u.Sub)
 	srv.sessions[key].set("email", u.Email)
 	srv.sessionMu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: sessionKey, Value: key, MaxAge: 2419200})
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionKey,
+		Value:    key,
+		MaxAge:   2419200,
+		HttpOnly: true,
+	})
 	c, err := r.Cookie(redirectKey)
 	if err != nil {
 		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
