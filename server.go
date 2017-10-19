@@ -562,11 +562,16 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 	log.Printf("ping target: %s", pingURL.String())
 	var resp *http.Response
 	status := http.StatusNotFound
-	for i := 0; i < 10; i++ {
+	// Wait for the container to boot up.  If docker is 'cold', this can take a
+	// bit.  The maximum wait time here is 32 seconds.  If it doesn't start by
+	// then, it's probably not going to start.
+	sleep := time.Millisecond * 500
+	for i := 0; i < 6; i++ {
 		resp, err = http.Get(pingURL.String())
 		if err != nil {
 			log.Printf("ping failed: %s (attempt %d)", err, i)
-			time.Sleep(2 * time.Second)
+			time.Sleep(sleep)
+			sleep *= 2
 			continue
 		}
 		resp.Body.Close()
