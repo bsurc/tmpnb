@@ -243,7 +243,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			Path:   "/auth",
 		}
 		// switch to http if not cert/key provided
-		if srv.TLSCert == "" || srv.TLSKey == "" {
+		if (srv.TLSCert == "" || srv.TLSKey == "") && !srv.EnableACME {
 			rdu.Scheme = "http"
 		}
 		if srv.Port != "" {
@@ -899,7 +899,11 @@ func (srv *notebookServer) Start() {
 				log.Fatal(httpServer.ListenAndServe())
 			}()
 		}
-		log.Fatal(srv.Serve(autocert.NewListener(srv.Host)))
+		if srv.EnableACME {
+			log.Fatal(srv.Serve(autocert.NewListener(srv.Host)))
+		} else {
+			log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
+		}
 	} else {
 		log.Fatal(srv.ListenAndServe())
 	}
