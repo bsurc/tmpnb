@@ -33,6 +33,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/shirou/gopsutil/mem"
+	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -897,7 +898,7 @@ func (srv *notebookServer) Start() {
 				log.Fatal(httpServer.ListenAndServe())
 			}()
 		}
-		log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
+		log.Fatal(http.Serve(autocert.NewListener(srv.Host)))
 	} else {
 		log.Fatal(srv.ListenAndServe())
 	}
