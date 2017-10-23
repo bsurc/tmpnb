@@ -152,6 +152,7 @@ type notebookServer struct {
 	Port               string        `json:"port"`
 	Host               string        `json:"host"`
 	HTTPRedirect       bool          `json:"http_redirect"`
+	EnableACME         bool          `json:"enable_acme"`
 	TLSCert            string        `json:"tls_cert"`
 	TLSKey             string        `json:"tls_key"`
 	OAuthConfig        struct {
@@ -898,7 +899,7 @@ func (srv *notebookServer) Start() {
 				log.Fatal(httpServer.ListenAndServe())
 			}()
 		}
-		log.Fatal(http.Serve(autocert.NewListener(srv.Host)))
+		log.Fatal(srv.Serve(autocert.NewListener(srv.Host)))
 	} else {
 		log.Fatal(srv.ListenAndServe())
 	}
