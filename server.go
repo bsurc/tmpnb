@@ -882,7 +882,7 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 
 // Start starts the http/s listener.
 func (srv *notebookServer) Start() {
-	if srv.TLSCert != "" && srv.TLSKey != "" {
+	if (srv.TLSCert != "" && srv.TLSKey != "") || srv.EnableACME {
 		if srv.HTTPRedirect {
 			httpServer := http.Server{}
 			httpMux := http.NewServeMux()
