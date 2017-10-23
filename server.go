@@ -291,7 +291,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	// we'll have to handle this by parsing invalid requests such as expired
 	// notebook proxies.  We'll just re-enable this for now, and fix it if
 	// someone complains.
-	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.listHandler)))
+	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
 	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
