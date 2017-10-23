@@ -900,8 +900,10 @@ func (srv *notebookServer) Start() {
 			}()
 		}
 		if srv.EnableACME {
+			log.Print("using acme via letsencrypt")
 			log.Fatal(srv.Serve(autocert.NewListener(srv.Host)))
 		} else {
+			log.Print("using standard tls")
 			log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
 		}
 	} else {
