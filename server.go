@@ -291,7 +291,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	// we'll have to handle this by parsing invalid requests such as expired
 	// notebook proxies.  We'll just re-enable this for now, and fix it if
 	// someone complains.
-	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
+	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.rootHandler)))
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
 	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
@@ -734,6 +734,16 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		Path:  handlerURL.Path,
 		Token: srv.token,
 	})
+}
+
+// Handle the root request.  All un-muxed requests come through here, if it
+// isn't exactly '/', 404.
+func (srv *notebookServer) rootHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	srv.listImagesHandler(w, r)
 }
 
 // aboutHandler serves the about text directly.
