@@ -285,6 +285,13 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 	// Use the internal mux, it has deregister
 	srv.mux = new(ServeMux)
+	// TODO(kyle): Since the root handler calls all unmatched URL requests,
+	// anything not handled in the mux gets the root treatment.  This may not be
+	// desirable in all cases.  We'd probably like to issue 404/401 etc., but
+	// we'll have to handle this by parsing invalid requests such as expired
+	// notebook proxies.  We'll just re-enable this for now, and fix it if
+	// someone complains.
+	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.listHandler)))
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
 	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
