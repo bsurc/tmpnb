@@ -560,22 +560,22 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// ping && running
-	var tmpnb *notebook
+	var nb *notebook
 	for _, v := range srv.pool.containerMap {
 		if v.id == id {
-			tmpnb = v
+			nb = v
 			break
 		}
 	}
-	if tmpnb == nil {
+	if nb == nil {
 		log.Printf("couldn't find container in containerMap: %s", id)
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	pingURL := url.URL{
 		Scheme: "http",
-		Host:   strings.Split(r.Host, ":")[0] + fmt.Sprintf(":%d", tmpnb.port),
-		Path:   path.Join("/book", tmpnb.hash) + "/",
+		Host:   strings.Split(r.Host, ":")[0] + fmt.Sprintf(":%d", nb.port),
+		Path:   path.Join("/book", nb.hash) + "/",
 	}
 	log.Printf("ping target: %s", pingURL.String())
 	var resp *http.Response
@@ -644,7 +644,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 
 	_, pull := r.Form["pull"]
 
-	tmpnb, err := srv.pool.newNotebook(imageName, pull, email)
+	nb, err := srv.pool.newNotebook(imageName, pull, email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		log.Print(err)
@@ -655,15 +655,15 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		// If we have a valid notebook, it may already be running in persistent
 		// mode.  Check the mux and see if the path is already registered.  If it
 		// is, just point it to the existing notebook.
-		if srv.mux.Registered(tmpnb.path()) {
-			http.Redirect(w, r, tmpnb.path(), http.StatusTemporaryRedirect)
+		if srv.mux.Registered(nb.path()) {
+			http.Redirect(w, r, nb.path(), http.StatusTemporaryRedirect)
 			return
 		}
 	}
 
 	proxyURL := url.URL{
 		Scheme: "http",
-		Host:   fmt.Sprintf("localhost:%d", tmpnb.port),
+		Host:   fmt.Sprintf("localhost:%d", nb.port),
 	}
 	log.Printf("reverse proxy URL: %s", proxyURL.String())
 
@@ -680,11 +680,11 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			IdleConnTimeout: 30 * time.Second,
 		}
 	*/
-	handlerPath := tmpnb.path()
+	handlerPath := nb.path()
 	log.Printf("handler: %s", handlerPath)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		// Read the cookie for session information and compare the
-		// email to the email provided by the tmpnb. If they match,
+		// email to the email provided by the nb. If they match,
 		// allow access, else redirect them to /list
 		if srv.enableOAuth {
 			email := ""
@@ -699,19 +699,19 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			if s != nil {
 				email = s.get("email")
 			}
-			if email != tmpnb.email {
+			if email != nb.email {
 				http.Redirect(w, r, "/list", http.StatusUnauthorized)
 				return
 			}
 		}
 
-		tmpnb.Lock()
-		tmpnb.lastAccessed = time.Now()
-		tmpnb.Unlock()
+		nb.Lock()
+		nb.lastAccessed = time.Now()
+		nb.Unlock()
 		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		if isWebsocket(r) {
 			log.Print("proxying to websocket handler")
-			f := websocketProxy(fmt.Sprintf(":%d", tmpnb.port))
+			f := websocketProxy(fmt.Sprintf(":%d", nb.port))
 			f.ServeHTTP(w, r)
 			return
 		}
@@ -734,7 +734,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		Path  string
 		Token string
 	}{
-		ID:    tmpnb.id,
+		ID:    nb.id,
 		Path:  handlerURL.Path,
 		Token: srv.token,
 	})
