@@ -61,6 +61,12 @@ type tempNotebook struct {
 	email string
 }
 
+// Return the path that should be registered in a mux.  This avoids duplicate
+// code everywhere that is fragile.
+func (n *tempNotebook) path() string {
+	return path.Join("/book", n.hash) + "/"
+}
+
 // notebookPool holds data regarding running notebooks.
 type notebookPool struct {
 	// guards the entire struct
@@ -79,13 +85,6 @@ type notebookPool struct {
 	// persisent allows changes to be stored in new docker images for continued
 	// use.
 	persistent bool
-
-	// persistentMu guards the persistentMap
-	persistentMu sync.Mutex
-
-	// persistantMap has an email for a key, and an image name for a value.  This
-	// allows user to spawn saved containers.
-	persistentMap map[string]string
 
 	// portSet holds free ports
 	portSet *portRange
@@ -159,7 +158,6 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		imageMatch:        imageMatch,
 		containerMap:      make(map[string]*tempNotebook),
 		persistent:        persistent,
-		persistentMap:     map[string]string{},
 		portSet:           newPortRange(8000, maxContainers),
 		maxContainers:     maxContainers,
 		containerLifetime: lifetime,
@@ -197,6 +195,22 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*temp
 
 	if p.persistent && email != "" {
 		image += ":" + strings.Split(email, "@")[0]
+		// Check for an existing, running notebook for the user.  If it exists,
+		// point them to that running notebook.
+		var tnb *tempNotebook
+		p.Lock()
+		for _, nb := range p.containerMap {
+			nb.Lock()
+			e := nb.email
+			nb.Unlock()
+			if e == email {
+				tnb = nb
+			}
+		}
+		p.Unlock()
+		if tnb != nil {
+			return tnb, nil
+		}
 	} else {
 		image += ":latest"
 	}
@@ -317,6 +331,10 @@ type nbCopy struct {
 	lastAccessed time.Time
 	port         int
 	email        string
+}
+
+func (n nbCopy) path() string {
+	return (&tempNotebook{hash: n.hash}).path()
 }
 
 func (p *notebookPool) saveImage(c nbCopy, image string) error {
@@ -493,7 +511,7 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 			// This isn't very elegant, but we couldn't delete the pattern from the mux
 			// before, but now we can with the vendored/updated copy in mux.go.  We add
 			// a trailing slash when we register the path, so we must add it here too.
-			p.deregisterMux <- path.Join("/book", c.hash) + "/"
+			p.deregisterMux <- c.path()
 			// If we are saving the image, check and see if it exists.  If it does,
 			// overwrite it.  If it doesn't create a new image name.  make it the
 			// original image name, with a tag of the users email.

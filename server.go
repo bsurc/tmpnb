@@ -648,6 +648,16 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	if srv.Persistant {
+		// If we have a valid notebook, it may already be running in persistent
+		// mode.  Check the mux and see if the path is already registered.  If it
+		// is, just point it to the existing notebook.
+		if srv.mux.Registered(tmpnb.path()) {
+			http.Redirect(w, r, tmpnb.path(), http.StatusTemporaryRedirect)
+			return
+		}
+	}
+
 	proxyURL := url.URL{
 		Scheme: "http",
 		Host:   fmt.Sprintf("localhost:%d", tmpnb.port),
@@ -667,7 +677,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			IdleConnTimeout: 30 * time.Second,
 		}
 	*/
-	handlerPath := path.Join("/book", tmpnb.hash) + "/"
+	handlerPath := tmpnb.path()
 	log.Printf("handler: %s", handlerPath)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		// Read the cookie for session information and compare the
