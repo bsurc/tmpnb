@@ -89,6 +89,14 @@ type notebookPool struct {
 	// use.
 	persistent bool
 
+	// writeMu guards imageWrite
+	writeMu sync.Mutex
+
+	// imageWrite contains keys of the images currently being written to disk.
+	// New containers from this image cannot be spawned while writing is in
+	// progress.
+	imageWrite map[string]struct{}
+
 	// portSet holds free ports
 	portSet *portRange
 
@@ -163,6 +171,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		imageMatch:        imageMatch,
 		containerMap:      make(map[string]*notebook),
 		persistent:        persistent,
+		imageWrite:        map[string]struct{}{},
 		portSet:           newPortRange(8000, maxContainers),
 		maxContainers:     maxContainers,
 		containerLifetime: lifetime,
@@ -201,6 +210,25 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 	tag := "latest"
 	utag := strings.Split(email, "@")[0]
 	if p.persistent {
+		uim := image + ":" + utag
+		// Check and see if the image is currently being written.  If it is, give
+		// it a chance before erroring.
+		writing := false
+		d := time.Millisecond * 250
+		for i := 0; i < 4; i++ {
+			p.writeMu.Lock()
+			_, writing = p.imageWrite[uim]
+			p.writeMu.Unlock()
+			if !writing {
+				break
+			}
+			time.Sleep(d)
+			d *= 2
+		}
+		// If we are still writing, nothing we can do...
+		if writing {
+			return nil, fmt.Errorf("%s is being written to disk, please try again later")
+		}
 		p.Lock()
 		if _, ok := p.availableImages[image+":"+utag]; ok {
 			tag = utag
@@ -355,13 +383,19 @@ func (n nbCopy) path() string {
 //
 // TODO(kyle): lock images while writing to disk?
 func (p *notebookPool) saveImage(c nbCopy, image string) error {
+	// Notify that we are writing to disk
+	p.writeMu.Lock()
+	p.imageWrite["image"] = struct{}{}
+	p.writeMu.Unlock()
+	defer func() {
+		p.writeMu.Lock()
+		delete(p.imageWrite, image)
+		p.writeMu.Unlock()
+	}()
 	cli, err := client.NewEnvClient()
 	if err != nil {
 		return err
 	}
-	p.Lock()
-	_, update := p.availableImages[image]
-	p.Unlock()
 	ctx := context.Background()
 	// Get the container info
 	cj, err := cli.ContainerInspect(ctx, c.id)
@@ -374,11 +408,7 @@ func (p *notebookPool) saveImage(c nbCopy, image string) error {
 		Pause:     true,
 		Config:    &container.Config{},
 	}
-	if update {
-		_, err = cli.ContainerUpdate(ctx, c.id, container.UpdateConfig{})
-	} else {
-		_, err = cli.ContainerCommit(ctx, c.id, opts)
-	}
+	_, err = cli.ContainerCommit(ctx, c.id, opts)
 	if err != nil {
 		return err
 	}
