@@ -151,7 +151,8 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 			continue
 		}
 		log.Printf("found image %s", image.RepoTags[0])
-		imageMap[image.RepoTags[0]] = struct{}{}
+		tagless := strings.Split(image.RepoTags[0], ":")[0]
+		imageMap[tagless] = struct{}{}
 	}
 	pool := &notebookPool{
 		availableImages:   imageMap,
@@ -194,8 +195,15 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*temp
 		return nil, err
 	}
 
-	// TODO(kyle): possibly provide tag support
-	if pull {
+	if p.persistent && email != "" {
+		image += ":" + strings.Split(email, "@")[0]
+	} else {
+		image += ":latest"
+	}
+
+	log.Printf("creating container from image %s", image)
+
+	if pull && !p.persistent {
 		log.Printf("pulling container %s", image)
 		ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 		defer cancel()
@@ -316,6 +324,9 @@ func (p *notebookPool) saveImage(c nbCopy, image string) error {
 	if err != nil {
 		return err
 	}
+	p.Lock()
+	_, update := p.availableImages[image]
+	p.Unlock()
 	ctx := context.Background()
 	// Get the container info
 	cj, err := cli.ContainerInspect(ctx, c.id)
@@ -328,14 +339,14 @@ func (p *notebookPool) saveImage(c nbCopy, image string) error {
 		Pause:     true,
 		Config:    &container.Config{},
 	}
-	id, err := cli.ContainerCommit(ctx, c.id, opts)
-	_ = id
+	if update {
+		_, err = cli.ContainerUpdate(ctx, c.id, container.UpdateConfig{})
+	} else {
+		_, err = cli.ContainerCommit(ctx, c.id, opts)
+	}
 	if err != nil {
 		return err
 	}
-	p.Lock()
-	p.availableImages[image] = struct{}{}
-	p.Unlock()
 	return nil
 }
 
