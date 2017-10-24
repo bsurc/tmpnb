@@ -846,6 +846,7 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprintf(w, "Free memory: %d(%d MB)\n", vm.Free, vm.Free>>20)
 	t := srv.pool.NextCollection()
 	fmt.Fprintf(w, "Next container reclamation: %s (%s)\n", t, t.Sub(time.Now()))
+	fmt.Fprintf(w, "Persistent mode: %t\n", srv.Persistant)
 	// XXX: these are copies, they are local and we don't need to hold locks when
 	// accessing them.
 	nbs := srv.pool.activeNotebooks()
