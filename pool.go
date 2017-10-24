@@ -72,9 +72,12 @@ type notebookPool struct {
 	// guards the entire struct
 	sync.Mutex
 
-	// availableImages is a list of docker images that installed on the machine,
-	// and match the imageMatch expression
+	// availableImages holds a list of all images on the system that match
+	// imageMatch.
 	availableImages map[string]struct{}
+
+	// baseImages holds the base label for the image (tagless)
+	baseImages map[string]struct{}
 
 	// imageMatch filters available images by name
 	imageMatch *regexp.Regexp
@@ -137,6 +140,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		return nil, err
 	}
 	imageMap := map[string]struct{}{}
+	baseMap := map[string]struct{}{}
 	cli, err := client.NewEnvClient()
 	if err != nil {
 		return nil, err
@@ -150,11 +154,12 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 			continue
 		}
 		log.Printf("found image %s", image.RepoTags[0])
-		tagless := strings.Split(image.RepoTags[0], ":")[0]
-		imageMap[tagless] = struct{}{}
+		imageMap[image.RepoTags[0]] = struct{}{}
+		baseMap[strings.Split(image.RepoTags[0], ":")[0]] = struct{}{}
 	}
 	pool := &notebookPool{
 		availableImages:   imageMap,
+		baseImages:        baseMap,
 		imageMatch:        imageMatch,
 		containerMap:      make(map[string]*notebook),
 		persistent:        persistent,
@@ -193,26 +198,34 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 		return nil, err
 	}
 
-	if p.persistent && email != "" {
-		image += ":" + strings.Split(email, "@")[0]
-		// Check for an existing, running notebook for the user.  If it exists,
-		// point them to that running notebook.
-		var tnb *notebook
+	tag := "latest"
+	utag := strings.Split(email, "@")[0]
+	if p.persistent {
 		p.Lock()
-		for _, nb := range p.containerMap {
-			nb.Lock()
-			e := nb.email
-			nb.Unlock()
-			if e == email {
-				tnb = nb
-			}
+		if _, ok := p.availableImages[image+":"+utag]; ok {
+			tag = utag
 		}
 		p.Unlock()
-		if tnb != nil {
-			return tnb, nil
+	}
+	image += ":" + tag
+
+	// Check for an already running container with the user and the image name.
+	var pnb *notebook
+	p.Lock()
+	for _, nb := range p.containerMap {
+		nb.Lock()
+		e := nb.email
+		img := nb.imageName
+		nb.Unlock()
+		if e == nb.email && image == img {
+			pnb = nb
+			break
 		}
-	} else {
-		image += ":latest"
+	}
+	p.Unlock()
+	if pnb != nil {
+		log.Printf("container is running at: %s", pnb.hash)
+		return pnb, nil
 	}
 
 	log.Printf("creating container from image %s", image)
@@ -365,6 +378,9 @@ func (p *notebookPool) saveImage(c nbCopy, image string) error {
 	if err != nil {
 		return err
 	}
+	p.Lock()
+	p.availableImages[image] = struct{}{}
+	p.Unlock()
 	return nil
 }
 

@@ -636,7 +636,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		imageName = defaultNotebook
 	}
 
-	if _, ok := srv.pool.availableImages[imageName]; !ok {
+	if _, ok := srv.pool.baseImages[imageName]; !ok {
 		http.Error(w, fmt.Sprintf("invalid image name: %s", imageName), http.StatusBadRequest)
 		log.Printf("invalid image name: %s", imageName)
 		return
@@ -826,9 +826,11 @@ func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Requ
 // listImagesHandler lists html links to the different docker images.
 func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Request) {
 	images := []string{}
-	for k := range srv.pool.availableImages {
+	srv.pool.Lock()
+	for k := range srv.pool.baseImages {
 		images = append(images, k)
 	}
+	srv.pool.Unlock()
 	sort.Slice(images, func(i, j int) bool {
 		return images[i] < images[j]
 	})
