@@ -214,6 +214,9 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	}
 	srv.pool.disableJupyterAuth = srv.DisableJupyterAuth
 	srv.enableOAuth = srv.OAuthConfig.RegExp != "" || len(srv.OAuthConfig.WhiteList) > 0
+	if !srv.enableOAuth && srv.Persistant {
+		return nil, fmt.Errorf("OAuth must be enabled in persistent mode")
+	}
 	if srv.enableOAuth {
 		// OAuth
 		srv.sessions = map[string]*session{}
