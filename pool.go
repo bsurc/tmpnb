@@ -350,6 +350,10 @@ func (n nbCopy) path() string {
 	return (&notebook{hash: n.hash}).path()
 }
 
+// saveImage writes the container changes to disk.  Note that this is
+// potentially a long(ish) running process.
+//
+// TODO(kyle): lock images while writing to disk?
 func (p *notebookPool) saveImage(c nbCopy, image string) error {
 	cli, err := client.NewEnvClient()
 	if err != nil {
