@@ -227,7 +227,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 		}
 		// If we are still writing, nothing we can do...
 		if writing {
-			return nil, fmt.Errorf("%s is being written to disk, please try again later")
+			return nil, fmt.Errorf("%s is being written to disk, please try again later", image)
 		}
 		p.Lock()
 		if _, ok := p.availableImages[image+":"+utag]; ok {
