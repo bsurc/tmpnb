@@ -557,7 +557,7 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// ping && running
-	var tmpnb *tempNotebook
+	var tmpnb *notebook
 	for _, v := range srv.pool.containerMap {
 		if v.id == id {
 			tmpnb = v

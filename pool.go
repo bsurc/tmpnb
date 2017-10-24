@@ -44,7 +44,7 @@ const (
 )
 
 // tempNotebook holds context for a single container
-type tempNotebook struct {
+type notebook struct {
 	// guard struct (only used for lastAccessed right now)
 	sync.Mutex
 	// id is the docker container id.
@@ -63,7 +63,7 @@ type tempNotebook struct {
 
 // Return the path that should be registered in a mux.  This avoids duplicate
 // code everywhere that is fragile.
-func (n *tempNotebook) path() string {
+func (n *notebook) path() string {
 	return path.Join("/book", n.hash) + "/"
 }
 
@@ -80,7 +80,7 @@ type notebookPool struct {
 	imageMatch *regexp.Regexp
 
 	// containerMap is stores the contexts for the containers.
-	containerMap map[string]*tempNotebook
+	containerMap map[string]*notebook
 
 	// persisent allows changes to be stored in new docker images for continued
 	// use.
@@ -156,7 +156,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 	pool := &notebookPool{
 		availableImages:   imageMap,
 		imageMatch:        imageMatch,
-		containerMap:      make(map[string]*tempNotebook),
+		containerMap:      make(map[string]*notebook),
 		persistent:        persistent,
 		portSet:           newPortRange(8000, maxContainers),
 		maxContainers:     maxContainers,
@@ -185,7 +185,7 @@ func newHash(n int) string {
 }
 
 // newNotebook initializes and sets values for a new notebook.
-func (p *notebookPool) newNotebook(image string, pull bool, email string) (*tempNotebook, error) {
+func (p *notebookPool) newNotebook(image string, pull bool, email string) (*notebook, error) {
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
 	if err != nil {
@@ -197,7 +197,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*temp
 		image += ":" + strings.Split(email, "@")[0]
 		// Check for an existing, running notebook for the user.  If it exists,
 		// point them to that running notebook.
-		var tnb *tempNotebook
+		var tnb *notebook
 		p.Lock()
 		for _, nb := range p.containerMap {
 			nb.Lock()
@@ -290,7 +290,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*temp
 		return nil, err
 	}
 	log.Printf("created container: %s", resp.ID)
-	t := &tempNotebook{
+	t := &notebook{
 		id:           resp.ID,
 		hash:         hash,
 		imageName:    image,
@@ -308,7 +308,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*temp
 }
 
 // addNotebook adds a tempNotebook to the containerMap, if there is room.
-func (p *notebookPool) addNotebook(t *tempNotebook) error {
+func (p *notebookPool) addNotebook(t *notebook) error {
 	p.Lock()
 	n := len(p.containerMap)
 	log.Printf("pool size: %d of %d", n+1, p.maxContainers)
@@ -334,7 +334,7 @@ type nbCopy struct {
 }
 
 func (n nbCopy) path() string {
-	return (&tempNotebook{hash: n.hash}).path()
+	return (&notebook{hash: n.hash}).path()
 }
 
 func (p *notebookPool) saveImage(c nbCopy, image string) error {
@@ -388,14 +388,14 @@ func (p *notebookPool) stopAndKillContainer(id string) {
 
 // activeNotebooks fetchs copies of the tempNotebooks and returns them as a
 // slice.  The lock is obviously invalid.
-func (p *notebookPool) activeNotebooks() []tempNotebook {
+func (p *notebookPool) activeNotebooks() []notebook {
 	p.Lock()
 	n := len(p.containerMap)
-	nbs := make([]tempNotebook, n)
+	nbs := make([]notebook, n)
 	i := 0
 	for k := range p.containerMap {
 		c := p.containerMap[k]
-		nbs[i] = tempNotebook{
+		nbs[i] = notebook{
 			id:           c.id,
 			hash:         c.hash,
 			imageName:    c.imageName,
@@ -473,14 +473,14 @@ func (p *notebookPool) stopCollector() {
 // is ignored.
 func (p *notebookPool) releaseContainers(force, async bool) error {
 	p.Lock()
-	trash := []tempNotebook{}
+	trash := []notebook{}
 	for _, c := range p.containerMap {
 		c.Lock()
 		age := time.Now().Sub(c.lastAccessed)
 		if age.Seconds() > p.containerLifetime.Seconds() || force {
 			log.Printf("age: %v\n", age)
 			//trash = append(trash, *c)
-			trash = append(trash, tempNotebook{
+			trash = append(trash, notebook{
 				id:           c.id,
 				hash:         c.hash,
 				imageName:    c.imageName,
