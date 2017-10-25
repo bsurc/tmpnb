@@ -5,8 +5,11 @@
 package main
 
 import (
+	"fmt"
+	"net/http"
 	"regexp"
 	"testing"
+	"time"
 )
 
 func TestImageMatch(t *testing.T) {
@@ -29,4 +32,26 @@ func TestImageMatch(t *testing.T) {
 			t.Errorf("missed match: %v", test)
 		}
 	}
+}
+
+func TestNewNotebook(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping docker dependent test")
+	}
+	p, err := newNotebookPool(".*", 2, time.Minute*2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.disableJupyterAuth = false
+	nb, err := p.newNotebook("jupyter/minimal-notebook", false, "")
+	if err != nil {
+		t.Error(err)
+	}
+	time.Sleep(time.Second * 10)
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/?token=", nb.port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	p.stopAndKillContainer(nb.id)
 }
