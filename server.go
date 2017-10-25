@@ -33,6 +33,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/shirou/gopsutil/mem"
+	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -152,6 +153,7 @@ type notebookServer struct {
 	Persistant         bool          `json:"persistent"`
 	Host               string        `json:"host"`
 	HTTPRedirect       bool          `json:"http_redirect"`
+	EnableACME         bool          `json:"enable_acme"`
 	TLSCert            string        `json:"tls_cert"`
 	TLSKey             string        `json:"tls_key"`
 	OAuthConfig        struct {
@@ -245,7 +247,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			Path:   "/auth",
 		}
 		// switch to http if not cert/key provided
-		if srv.TLSCert == "" || srv.TLSKey == "" {
+		if (srv.TLSCert == "" || srv.TLSKey == "") && !srv.EnableACME {
 			rdu.Scheme = "http"
 		}
 		if srv.Port != "" {
@@ -905,7 +907,7 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 
 // Start starts the http/s listener.
 func (srv *notebookServer) Start() {
-	if srv.TLSCert != "" && srv.TLSKey != "" {
+	if (srv.TLSCert != "" && srv.TLSKey != "") || srv.EnableACME {
 		if srv.HTTPRedirect {
 			httpServer := http.Server{}
 			httpMux := http.NewServeMux()
@@ -922,7 +924,13 @@ func (srv *notebookServer) Start() {
 				log.Fatal(httpServer.ListenAndServe())
 			}()
 		}
-		log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
+		if srv.EnableACME {
+			log.Print("using acme via letsencrypt")
+			log.Fatal(srv.Serve(autocert.NewListener(srv.Host)))
+		} else {
+			log.Print("using standard tls")
+			log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
+		}
 	} else {
 		log.Fatal(srv.ListenAndServe())
 	}
