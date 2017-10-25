@@ -238,22 +238,24 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 	image += ":" + tag
 
 	// Check for an already running container with the user and the image name.
-	var pnb *notebook
-	p.Lock()
-	for _, nb := range p.containerMap {
-		nb.Lock()
-		e := nb.email
-		img := nb.imageName
-		nb.Unlock()
-		if e == nb.email && image == img {
-			pnb = nb
-			break
+	if p.persistent {
+		var pnb *notebook
+		p.Lock()
+		for _, nb := range p.containerMap {
+			nb.Lock()
+			e := nb.email
+			img := nb.imageName
+			nb.Unlock()
+			if e == nb.email && image == img {
+				pnb = nb
+				break
+			}
 		}
-	}
-	p.Unlock()
-	if pnb != nil {
-		log.Printf("container is running at: %s", pnb.hash)
-		return pnb, nil
+		p.Unlock()
+		if pnb != nil {
+			log.Printf("container is running at: %s", pnb.hash)
+			return pnb, nil
+		}
 	}
 
 	log.Printf("creating container from image %s", image)
