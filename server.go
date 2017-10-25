@@ -287,6 +287,9 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 	// Use the internal mux, it has deregister
 	srv.mux = new(ServeMux)
+	// handle '/' explicitly.  If the path isn't exactly '/', the handler issues
+	// 404.
+	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.rootHandler)))
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
 	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
@@ -383,7 +386,7 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				// not let people without a valid session cookie get to another
 				// person's notebook.
 				switch u.Path {
-				case "/about", "/list", "/privacy", "/stats":
+				case "/", "/about", "/list", "/privacy", "/stats":
 					break
 				default:
 					key := newHash(defaultHashSize)
@@ -681,6 +684,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			email := ""
 			c, err := r.Cookie(sessionKey)
 			if err != nil {
+				log.Printf("invalid cookie")
 				http.Redirect(w, r, "/list", http.StatusUnauthorized)
 				return
 			}
@@ -729,6 +733,16 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		Path:  handlerURL.Path,
 		Token: srv.token,
 	})
+}
+
+// Handle the root request.  All un-muxed requests come through here, if it
+// isn't exactly '/', 404.
+func (srv *notebookServer) rootHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	srv.listImagesHandler(w, r)
 }
 
 // aboutHandler serves the about text directly.
