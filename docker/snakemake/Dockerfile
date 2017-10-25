@@ -11,6 +11,7 @@ USER root
 # libav-tools for matplotlib anim
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl \
+    graphviz \
     libav-tools \
     less \
     nano \

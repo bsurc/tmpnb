@@ -358,6 +358,7 @@ func (p *notebookPool) addNotebook(t *notebook) error {
 	if n+1 > p.maxContainers {
 		p.releaseContainers(false, true)
 	}
+	n = len(p.containerMap)
 	if n+1 > p.maxContainers {
 		return errNotebookPoolFull
 	}

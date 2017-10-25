@@ -17,7 +17,7 @@ const portMapDebug = true
 type portRange struct {
 	// Mutex guards access to the bit map
 	sync.Mutex
-	// bits is the bit map representing the port range where bit 0 represents
+	// ports is the slice representing the port range where port[0] represents
 	// start
 	ports []bool
 	// start is the first port in the range
