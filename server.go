@@ -139,20 +139,21 @@ type notebookServer struct {
 	logWriter io.Writer
 
 	//Configuration options for the server
-	AccessLogfile     string        `json:"access_logfile"`
-	AssetPath         string        `json:"asset_path"`
-	ContainerLifetime time.Duration `json:"container_lifetime"`
-	EnableDockerPush  bool          `json:"enable_docker_push"`
-	EnablePProf       bool          `json:"enable_pprof"`
-	ImageRegexp       string        `json:"image_regexp"`
-	MaxContainers     int           `json:"max_containers"`
-	Logfile           string        `json:"logfile"`
-	Port              string        `json:"port"`
-	Host              string        `json:"host"`
-	HTTPRedirect      bool          `json:"http_redirect"`
-	TLSCert           string        `json:"tls_cert"`
-	TLSKey            string        `json:"tls_key"`
-	OAuthConfig       struct {
+	AccessLogfile      string        `json:"access_logfile"`
+	AssetPath          string        `json:"asset_path"`
+	ContainerLifetime  time.Duration `json:"container_lifetime"`
+	DisableJupyterAuth bool          `json:"disable_jupyter_auth"`
+	EnableDockerPush   bool          `json:"enable_docker_push"`
+	EnablePProf        bool          `json:"enable_pprof"`
+	ImageRegexp        string        `json:"image_regexp"`
+	MaxContainers      int           `json:"max_containers"`
+	Logfile            string        `json:"logfile"`
+	Port               string        `json:"port"`
+	Host               string        `json:"host"`
+	HTTPRedirect       bool          `json:"http_redirect"`
+	TLSCert            string        `json:"tls_cert"`
+	TLSKey             string        `json:"tls_key"`
+	OAuthConfig        struct {
 		WhiteList []string `json:"whitelist"`
 		RegExp    string   `json:"match"`
 	} `json:"oauth_confg"`
@@ -210,6 +211,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
+	srv.pool.disableJupyterAuth = srv.DisableJupyterAuth
 	srv.enableOAuth = srv.OAuthConfig.RegExp != "" || len(srv.OAuthConfig.WhiteList) > 0
 	if srv.enableOAuth {
 		// OAuth
@@ -387,7 +389,13 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 					srv.redirectMap[key] = r.RequestURI
 					srv.redirectMu.Unlock()
 					const redirectExpire = 60
-					http.SetCookie(w, &http.Cookie{Name: redirectKey, Value: key, MaxAge: redirectExpire})
+					http.SetCookie(w, &http.Cookie{
+						Name:     redirectKey,
+						Value:    key,
+						MaxAge:   redirectExpire,
+						HttpOnly: true,
+					})
+
 					// Delete the key after 2 * redirectExpire.  This ensures that the
 					// map is cleared, even if the key is never used.  We could do it
 					// right after it's used, but if something goes wrong, or the user
@@ -470,7 +478,12 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 	srv.sessions[key].set("sub", u.Sub)
 	srv.sessions[key].set("email", u.Email)
 	srv.sessionMu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: sessionKey, Value: key, MaxAge: 2419200})
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionKey,
+		Value:    key,
+		MaxAge:   2419200,
+		HttpOnly: true,
+	})
 	c, err := r.Cookie(redirectKey)
 	if err != nil {
 		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
@@ -560,11 +573,16 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 	log.Printf("ping target: %s", pingURL.String())
 	var resp *http.Response
 	status := http.StatusNotFound
-	for i := 0; i < 10; i++ {
+	// Wait for the container to boot up.  If docker is 'cold', this can take a
+	// bit.  The maximum wait time here is 32 seconds.  If it doesn't start by
+	// then, it's probably not going to start.
+	sleep := time.Millisecond * 500
+	for i := 0; i < 6; i++ {
 		resp, err = http.Get(pingURL.String())
 		if err != nil {
 			log.Printf("ping failed: %s (attempt %d)", err, i)
-			time.Sleep(2 * time.Second)
+			time.Sleep(sleep)
+			sleep *= 2
 			continue
 		}
 		resp.Body.Close()
@@ -592,16 +610,18 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	email := ""
-	c, err := r.Cookie(sessionKey)
-	if err != nil {
-		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-		return
-	}
-	srv.sessionMu.Lock()
-	s := srv.sessions[c.Value]
-	srv.sessionMu.Unlock()
-	if s != nil {
-		email = s.get("email")
+	if srv.enableOAuth {
+		c, err := r.Cookie(sessionKey)
+		if err != nil {
+			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
+			return
+		}
+		srv.sessionMu.Lock()
+		s := srv.sessions[c.Value]
+		srv.sessionMu.Unlock()
+		if s != nil {
+			email = s.get("email")
+		}
 	}
 
 	var imageName = r.FormValue("image")
@@ -655,21 +675,23 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		// Read the cookie for session information and compare the
 		// email to the email provided by the tmpnb. If they match,
 		// allow access, else redirect them to /list
-		eMail := ""
-		c, err := r.Cookie(sessionKey)
-		if err != nil {
-			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-			return
-		}
-		srv.sessionMu.Lock()
-		s := srv.sessions[c.Value]
-		srv.sessionMu.Unlock()
-		if s != nil {
-			eMail = s.get("email")
-		}
-		if eMail != tmpnb.userEmail {
-			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-			return
+		if srv.enableOAuth {
+			email := ""
+			c, err := r.Cookie(sessionKey)
+			if err != nil {
+				http.Redirect(w, r, "/list", http.StatusUnauthorized)
+				return
+			}
+			srv.sessionMu.Lock()
+			s := srv.sessions[c.Value]
+			srv.sessionMu.Unlock()
+			if s != nil {
+				email = s.get("email")
+			}
+			if email != tmpnb.userEmail {
+				http.Redirect(w, r, "/list", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		tmpnb.Lock()
@@ -831,30 +853,29 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		b := nbs[j].lastAccessed
 		return a.Before(b)
 	})
-	fmt.Fprintf(w, "All Notebooks:\n")
-	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\tExpires in\n")
+	fmt.Fprintf(w, "all notebooks:\n")
+	fmt.Fprintf(tw, "hash prefix\tdocker id\timage name\tlast accessed\texpires in\n")
 	for i := 0; i < len(nbs); i++ {
 		e := time.Until(nbs[i].lastAccessed.Add(srv.pool.containerLifetime))
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", nbs[i].hash[:8], nbs[i].imageName, nbs[i].lastAccessed, e)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", nbs[i].hash[:8], nbs[i].id[:8], nbs[i].imageName, nbs[i].lastAccessed, e)
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
 
 	qnbs := srv.pool.queuedNotebooks()
-	fmt.Fprintf(w, "Queued Notebooks:\n")
-	fmt.Fprintf(tw, "Hash Prefix\tImage Name\tLast Accessed\tExpires in\n")
+	fmt.Fprintf(w, "queued notebooks:\n")
+	fmt.Fprintf(tw, "hash prefix\timage name\tlast accessed\texpires in\n")
 	for i := 0; i < len(qnbs); i++ {
 		fmt.Fprintf(tw, "%s\t%s\t\n", qnbs[i].hash[:8], qnbs[i].imageName)
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
-
-	fmt.Fprintf(w, "Zombie Containers:\n")
-	fmt.Fprintf(w, "ID\tNames\tImage\tCreated\n")
+	fmt.Fprintf(tw, "zombies:\n")
+	fmt.Fprintf(tw, "docker id\tnames\timage\tcreated\n")
 	zombies, _ := srv.pool.zombieContainers()
 	for _, z := range zombies {
 		t := time.Unix(z.Created, 0)
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", z.ID, strings.Join(z.Names, ","), z.Image, t)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", z.ID[:8], strings.Join(z.Names, ","), z.Image, t)
 	}
 	tw.Flush()
 	// Dump the sock stats

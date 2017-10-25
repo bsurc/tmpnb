@@ -1,6 +1,7 @@
 {
   "asset_path": "./assets",
   "container_lifetime": 60000000000,
+  "disable_jupyter_auth": false,
   "enable_docker_push": true,
   "enable_pprof": true,
   "image_regexp": ".*",
@@ -15,6 +16,6 @@
   "oauth_confg": {
     "whitelist": [
     ],
-    "match": ""
+    "match": "bsu"
   }
 }

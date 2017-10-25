@@ -130,6 +130,9 @@ type notebookPool struct {
 	// containerLifetime governs when the container resources are reclaimed.
 	containerLifetime time.Duration
 
+	// disableJupyterAuth controls using an auth token
+	disableJupyterAuth bool
+
 	// token is the security token for auto-auth
 	token string
 
@@ -262,6 +265,13 @@ func (p *notebookPool) createAndStartContainer(image, email string, pull bool) (
 		return nil, err
 	}
 	portString := fmt.Sprintf("%d", port)
+	tokenArg := fmt.Sprintf(`--NotebookApp.token="%s"`, p.token)
+	var env []string
+	if p.disableJupyterAuth {
+		tokenArg = fmt.Sprintf(`--NotebookApp.token=""`)
+	} else {
+		env = []string{fmt.Sprintf("CONFIGPROXY_AUTH_TOKEN=%s", p.token)}
+	}
 	var pSet = nat.PortSet{}
 	pt, err := nat.NewPort("tcp", portString)
 	pSet[pt] = struct{}{}
@@ -276,10 +286,10 @@ func (p *notebookPool) createAndStartContainer(image, email string, pull bool) (
 			`--ip=0.0.0.0`,
 			fmt.Sprintf("--NotebookApp.base_url=%s", path.Join("/book", hash)),
 			`--NotebookApp.port_retries=0`,
-			fmt.Sprintf(`--NotebookApp.token="%s"`, p.token),
+			tokenArg,
 			`--NotebookApp.disable_check_xsrf=True`,
 		},
-		Env:          []string{fmt.Sprintf("CONFIGPROXY_AUTH_TOKEN=%s", p.token)},
+		Env:          env,
 		Image:        image,
 		ExposedPorts: pSet,
 	}
@@ -358,6 +368,7 @@ func (p *notebookPool) newNotebook(image, email string, pull bool) (*tempNoteboo
 func (p *notebookPool) addNotebook(t *tempNotebook) error {
 	p.Lock()
 	defer p.Unlock()
+	p.Lock()
 	n := len(p.containerMap)
 	log.Printf("pool size: %d of %d", n+1, p.maxContainers)
 	if n+1 > p.maxContainers {
@@ -506,6 +517,7 @@ func (p *notebookPool) stopCollector() {
 func (p *notebookPool) releaseContainers(force, async bool) error {
 	p.Lock()
 	trash := []tempNotebook{}
+	alive := 0
 	for _, c := range p.containerMap {
 		c.Lock()
 		age := time.Now().Sub(c.lastAccessed)
@@ -518,15 +530,17 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 				lastAccessed: c.lastAccessed,
 				port:         c.port,
 			})
+		} else {
+			alive++
 		}
 		c.Unlock()
 	}
 	p.Unlock()
 
-	if force {
+	if force || alive < 1 {
 		p.reserveMu.Lock()
 		for _, v := range p.reserveMap {
-			for _, c := range v.q {
+			for c := v.Pop(); c != nil; c = v.Pop() {
 				trash = append(trash, tempNotebook{
 					id:           c.id,
 					hash:         c.hash,
