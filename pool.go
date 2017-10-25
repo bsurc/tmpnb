@@ -387,7 +387,7 @@ func (n nbCopy) path() string {
 func (p *notebookPool) saveImage(c nbCopy, image string) error {
 	// Notify that we are writing to disk
 	p.writeMu.Lock()
-	p.imageWrite["image"] = struct{}{}
+	p.imageWrite[image] = struct{}{}
 	p.writeMu.Unlock()
 	defer func() {
 		p.writeMu.Lock()
