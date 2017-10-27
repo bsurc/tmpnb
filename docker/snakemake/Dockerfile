@@ -11,6 +11,7 @@ USER root
 # libav-tools for matplotlib anim
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl \
+    graphviz \
     libav-tools \
     less \
     nano \
@@ -30,3 +31,4 @@ RUN curl https://codeload.github.com/bsmith89/make-example/tar.gz/v1.0-snap \
     > make-example-1.0-snap.tgz && \
     tar -xzf make-example-1.0-snap.tgz && \
     cd make-example-1.0-snap
+RUN git clone https://github.com/bsmith89/snakemake-boise

@@ -33,6 +33,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/shirou/gopsutil/mem"
+	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -151,6 +152,7 @@ type notebookServer struct {
 	Port               string        `json:"port"`
 	Host               string        `json:"host"`
 	HTTPRedirect       bool          `json:"http_redirect"`
+	EnableACME         bool          `json:"enable_acme"`
 	TLSCert            string        `json:"tls_cert"`
 	TLSKey             string        `json:"tls_key"`
 	OAuthConfig        struct {
@@ -241,7 +243,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			Path:   "/auth",
 		}
 		// switch to http if not cert/key provided
-		if srv.TLSCert == "" || srv.TLSKey == "" {
+		if (srv.TLSCert == "" || srv.TLSKey == "") && !srv.EnableACME {
 			rdu.Scheme = "http"
 		}
 		if srv.Port != "" {
@@ -285,6 +287,9 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 	// Use the internal mux, it has deregister
 	srv.mux = new(ServeMux)
+	// handle '/' explicitly.  If the path isn't exactly '/', the handler issues
+	// 404.
+	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.rootHandler)))
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
 	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
@@ -300,6 +305,10 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		srv.mux.Handle("/debug/pprof/profile", srv.accessLogHandler(http.HandlerFunc(pprof.Profile)))
 		srv.mux.Handle("/debug/pprof/symbol", srv.accessLogHandler(http.HandlerFunc(pprof.Symbol)))
 	}
+
+	srv.mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("User-agent: *\nDisallow: /"))
+	})
 
 	srv.Handler = srv.mux
 
@@ -381,7 +390,7 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				// not let people without a valid session cookie get to another
 				// person's notebook.
 				switch u.Path {
-				case "/about", "/list", "/privacy", "/stats":
+				case "/", "/about", "/list", "/privacy", "/stats":
 					break
 				default:
 					key := newHash(defaultHashSize)
@@ -679,6 +688,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			email := ""
 			c, err := r.Cookie(sessionKey)
 			if err != nil {
+				log.Printf("invalid cookie")
 				http.Redirect(w, r, "/list", http.StatusUnauthorized)
 				return
 			}
@@ -727,6 +737,16 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		Path:  handlerURL.Path,
 		Token: srv.token,
 	})
+}
+
+// Handle the root request.  All un-muxed requests come through here, if it
+// isn't exactly '/', 404.
+func (srv *notebookServer) rootHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	srv.listImagesHandler(w, r)
 }
 
 // aboutHandler serves the about text directly.
@@ -889,7 +909,7 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 
 // Start starts the http/s listener.
 func (srv *notebookServer) Start() {
-	if srv.TLSCert != "" && srv.TLSKey != "" {
+	if (srv.TLSCert != "" && srv.TLSKey != "") || srv.EnableACME {
 		if srv.HTTPRedirect {
 			httpServer := http.Server{}
 			httpMux := http.NewServeMux()
@@ -906,7 +926,13 @@ func (srv *notebookServer) Start() {
 				log.Fatal(httpServer.ListenAndServe())
 			}()
 		}
-		log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
+		if srv.EnableACME {
+			log.Print("using acme via letsencrypt")
+			log.Fatal(srv.Serve(autocert.NewListener(srv.Host)))
+		} else {
+			log.Print("using standard tls")
+			log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
+		}
 	} else {
 		log.Fatal(srv.ListenAndServe())
 	}
