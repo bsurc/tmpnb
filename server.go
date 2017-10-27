@@ -306,6 +306,10 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		srv.mux.Handle("/debug/pprof/symbol", srv.accessLogHandler(http.HandlerFunc(pprof.Symbol)))
 	}
 
+	srv.mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("User-agent: *\nDisallow: /"))
+	})
+
 	srv.Handler = srv.mux
 
 	templateFiles, err := filepath.Glob(filepath.Join(srv.AssetPath, "templates", "*.html"))
