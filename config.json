@@ -1,8 +1,9 @@
 {
   "asset_path": "./assets",
-  "container_lifetime": 60000000000,
+  "container_lifetime": 240000000000,
   "disable_jupyter_auth": false,
   "enable_acme": false,
+  "enable_csp": true,
   "enable_docker_push": true,
   "enable_pprof": true,
   "image_regexp": ".*",

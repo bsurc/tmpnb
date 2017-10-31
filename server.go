@@ -144,6 +144,7 @@ type notebookServer struct {
 	AssetPath          string        `json:"asset_path"`
 	ContainerLifetime  time.Duration `json:"container_lifetime"`
 	DisableJupyterAuth bool          `json:"disable_jupyter_auth"`
+	EnableCSP          bool          `json:"enable_csp"`
 	EnableDockerPush   bool          `json:"enable_docker_push"`
 	EnablePProf        bool          `json:"enable_pprof"`
 	ImageRegexp        string        `json:"image_regexp"`
@@ -370,7 +371,10 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 		var ok bool
 		var ses *session
 		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
-		w.Header().Set(cspKey, csp())
+		// Set the CSP headers if enabled
+		if srv.EnableCSP {
+			w.Header().Set(cspKey, csp())
+		}
 		if srv.enableOAuth {
 			c, err := r.Cookie(sessionKey)
 			if err == nil {
