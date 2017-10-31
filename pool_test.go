@@ -58,6 +58,9 @@ func TestNewNotebook(t *testing.T) {
 		t.Error(err)
 	}
 	time.Sleep(time.Second * 10)
+	if len(p.activeNotebooks()) != 1 {
+		t.Fatal("failed to create a notebook")
+	}
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/?token=", nb.port))
 	if err != nil {
 		t.Fatal(err)
