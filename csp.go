@@ -8,10 +8,10 @@ const cspKey = "Content-Security-Policy"
 
 func csp() string {
 	pairs := map[string][]string{
-		"default-src":     nil,
-		"script-src":      []string{"'self'"},
-		"style-src":       []string{"'self'"},
-		"img-src":         []string{"'self'"},
+		"default-src":     []string{"'self'"},
+		"script-src":      nil,
+		"style-src":       nil,
+		"img-src":         nil,
 		"connect-src":     nil,
 		"font-src":        nil,
 		"object-src":      nil,
@@ -19,14 +19,14 @@ func csp() string {
 		"sandbox":         nil,
 		"report-uri":      []string{"/csp_report"},
 		"child-src":       nil,
-		"form-action":     []string{"'self'"},
+		"form-action":     nil,
 		"frame-ancestors": nil,
 		"plugin-types":    nil,
 	}
 
 	s := ""
 	for k, v := range pairs {
-		if v != nil {
+		if v != nil && len(v) > 0 {
 			s += k + " " + strings.Join(v, " ")
 			s += "; "
 		}
