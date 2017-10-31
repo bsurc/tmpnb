@@ -16,3 +16,6 @@
 # vim
 *.swo
 *.swp
+
+# executable
+tmpnb
