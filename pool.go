@@ -368,11 +368,13 @@ func (p *notebookPool) newNotebook(image, email string, pull bool) (*tempNoteboo
 func (p *notebookPool) addNotebook(t *tempNotebook) error {
 	p.Lock()
 	defer p.Unlock()
+	p.Lock()
 	n := len(p.containerMap)
 	log.Printf("pool size: %d of %d", n+1, p.maxContainers)
 	if n+1 > p.maxContainers {
 		p.releaseContainers(false, true)
 	}
+	n = len(p.containerMap)
 	if n+1 > p.maxContainers {
 		return errNotebookPoolFull
 	}
