@@ -21,7 +21,7 @@ var (
 	//
 	// generates: "script-src;"
 	//
-	// which is evaluated in firefox as "script-src 'none'"
+	// which is evaluated in firefox as "script-src 'none';"
 	pairs = map[string][]string{
 		"default-src":     []string{"'self'"},
 		"script-src":      nil,
