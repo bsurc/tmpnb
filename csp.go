@@ -9,7 +9,7 @@ const cspKey = "Content-Security-Policy"
 func csp() string {
 	pairs := map[string][]string{
 		"default-src":     nil,
-		"script-src":      nil,
+		"script-src":      []string{"'self'"},
 		"style-src":       []string{"'self'"},
 		"img-src":         []string{"'self'"},
 		"connect-src":     nil,
