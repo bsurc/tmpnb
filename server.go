@@ -296,6 +296,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
+	srv.mux.Handle("/csp_report", http.HandlerFunc(srv.cspReportHandler))
 	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(srv.AssetPath))))
 	srv.mux.Handle("/stats", srv.accessLogHandler(http.HandlerFunc(srv.statsHandler)))
 	srv.mux.Handle("/status", srv.accessLogHandler(http.HandlerFunc(srv.statusHandler)))
@@ -369,6 +370,7 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 		var ok bool
 		var ses *session
 		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
+		w.Header().Set(cspKey, csp())
 		if srv.enableOAuth {
 			c, err := r.Cookie(sessionKey)
 			if err == nil {
@@ -428,6 +430,15 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 		h.ServeHTTP(w, r)
 	}
 	return http.HandlerFunc(f)
+}
+
+func (srv *notebookServer) cspReportHandler(w http.ResponseWriter, r *http.Request) {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	log.Print(string(body))
 }
 
 func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) {
