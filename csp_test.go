@@ -7,8 +7,7 @@ package main
 import "testing"
 
 func TestCSP(t *testing.T) {
-	s := csp()
-	if s == "" {
-		t.Fail()
+	if csp() != expCSP {
+		t.Errorf("invalid csp, got: %s, want: %s", csp, expCSP)
 	}
 }

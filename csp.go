@@ -5,13 +5,11 @@
 package main
 
 import (
+	"sort"
 	"strings"
 )
 
-// cspKey is the header key for the assigned values
-const cspKey = "Content-Security-Policy"
-
-func csp() string {
+var (
 	// Enable Content Security Policy.  We'll use the full blanket of 'self' for
 	// everything as long as we can.  We only had one inline javascript section,
 	// and we moved that into assets/static.  The /csp_report URI receives the
@@ -24,7 +22,7 @@ func csp() string {
 	// generates: "script-src;"
 	//
 	// which is evaluated in firefox as "script-src 'none'"
-	pairs := map[string][]string{
+	pairs = map[string][]string{
 		"default-src":     []string{"'self'"},
 		"script-src":      nil,
 		"style-src":       nil,
@@ -40,10 +38,32 @@ func csp() string {
 		"frame-ancestors": nil,
 		"plugin-types":    nil,
 	}
+	sortedCSPKeys []string
+)
 
+const (
+	// cspKey is the header key for the assigned values
+	cspKey = "Content-Security-Policy"
+
+	// expCSP is what we should get based on the key value pairs above
+	expCSP = "default-src 'self'; report-uri /csp_report; "
+)
+
+func init() {
+	sortedCSPKeys = make([]string, len(pairs))
+	i := 0
+	for k := range pairs {
+		sortedCSPKeys[i] = k
+		i++
+	}
+	sort.Strings(sortedCSPKeys)
+}
+
+func csp() string {
 	s := ""
-	for k, v := range pairs {
-		if v != nil {
+	for _, k := range sortedCSPKeys {
+		v, ok := pairs[k]
+		if ok && v != nil {
 			s += k + " " + strings.Join(v, " ")
 			s += "; "
 		}
