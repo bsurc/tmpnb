@@ -71,6 +71,14 @@ func TestZombiePort(t *testing.T) {
 	}
 }
 
+func TestOutOfRange(t *testing.T) {
+	pr := newPortRange(8000, 1)
+	err := pr.Drop(8002)
+	if err != errPortOutOfRange {
+		t.Errorf("unexpected error: %s", err)
+	}
+}
+
 func BenchmarkPortRange(b *testing.B) {
 	pr := newPortRange(8000, 100)
 
