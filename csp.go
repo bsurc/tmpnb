@@ -8,9 +8,22 @@ import (
 	"strings"
 )
 
+// cspKey is the header key for the assigned values
 const cspKey = "Content-Security-Policy"
 
 func csp() string {
+	// Enable Content Security Policy.  We'll use the full blanket of 'self' for
+	// everything as long as we can.  We only had one inline javascript section,
+	// and we moved that into assets/static.  The /csp_report URI receives the
+	// reports of any violations.  Note that an empty string slice actually means
+	// no value is set, but the key is present.  This has the affect of setting
+	// that key to 'none', which disallows that resource.  For example:
+	//
+	// "script-src": []string{}
+	//
+	// generates: "script-src;"
+	//
+	// which is evaluated in firefox as "script-src 'none'"
 	pairs := map[string][]string{
 		"default-src":     []string{"'self'"},
 		"script-src":      nil,
@@ -30,7 +43,7 @@ func csp() string {
 
 	s := ""
 	for k, v := range pairs {
-		if v != nil && len(v) > 0 {
+		if v != nil {
 			s += k + " " + strings.Join(v, " ")
 			s += "; "
 		}
