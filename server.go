@@ -7,6 +7,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -197,6 +198,10 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			return nil, err
 		}
 		log.SetOutput(srv.logWriter)
+	}
+	// Disallow http -> https redirect if not using standard ports
+	if srv.HTTPRedirect && srv.Port != "" {
+		return nil, fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port)
 	}
 	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, srv.ContainerLifetime)
 	if err != nil {
@@ -915,20 +920,49 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 func (srv *notebookServer) Start() {
 	if (srv.TLSCert != "" && srv.TLSKey != "") || srv.EnableACME {
 		if srv.HTTPRedirect {
-			httpServer := http.Server{}
-			httpMux := http.NewServeMux()
-			httpMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				u := *r.URL
-				u.Scheme = "https"
-				u.Host = r.Host
-				r.ParseForm()
-				u.RawPath = r.Form.Encode()
-				http.Redirect(w, r, u.String(), http.StatusPermanentRedirect)
-			})
-			httpServer.Handler = httpMux
+			httpServer := http.Server{
+				ReadTimeout:  5 * time.Second,
+				WriteTimeout: 5 * time.Second,
+				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					u := *r.URL
+					u.Scheme = "https"
+					u.Host = r.Host
+					r.ParseForm()
+					u.RawPath = r.Form.Encode()
+					w.Header().Set("Connection", "close")
+					http.Redirect(w, r, u.String(), http.StatusPermanentRedirect)
+				}),
+			}
 			go func() {
 				log.Fatal(httpServer.ListenAndServe())
 			}()
+		}
+		// Straight outta https://blog.cloudflare.com/exposing-go-on-the-internet/
+		srv.Server.TLSConfig = &tls.Config{
+			// Causes servers to use Go's default ciphersuite preferences,
+			// which are tuned to avoid attacks. Does nothing on clients.
+			PreferServerCipherSuites: true,
+			// Only use curves which have assembly implementations
+			CurvePreferences: []tls.CurveID{
+				tls.CurveP256,
+				tls.X25519, // Go 1.8 only
+			},
+			// If you can take the compatibility loss of the Modern configuration, you
+			// should then also set MinVersion and CipherSuites.
+			MinVersion: tls.VersionTLS12,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+
+				// Best disabled, as they don't provide Forward Secrecy,
+				// but might be necessary for some clients
+				// tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+				// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+			},
 		}
 		if srv.EnableACME {
 			log.Print("using acme via letsencrypt")
