@@ -118,7 +118,7 @@ func TestZombies(t *testing.T) {
 	// manually remove the container from the container map, and drop the port
 	p.portSet.Drop(nb.port)
 	p.Lock()
-	delete(p.containerMap, nb.hash)
+	delete(p.containerMap, nb.key)
 	p.Unlock()
 	c, err := p.zombieContainers()
 	if len(c) != 1 {

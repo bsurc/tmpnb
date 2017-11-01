@@ -207,7 +207,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	tkn := newHash(defaultHashSize)
+	tkn := newKey(defaultKeySize)
 	srv.pool = p
 	srv.token = tkn
 	srv.pool.token = tkn
@@ -263,7 +263,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			},
 			Endpoint: google.Endpoint,
 		}
-		srv.oauthState = newHash(defaultHashSize)
+		srv.oauthState = newKey(defaultKeySize)
 		switch srv.OAuthConfig.RegExp {
 		case "bsu":
 			srv.oauthMatch = regexp.MustCompile(bsuRegexp)
@@ -402,7 +402,7 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				case "/", "/about", "/list", "/privacy", "/stats":
 					break
 				default:
-					key := newHash(defaultHashSize)
+					key := newKey(defaultKeySize)
 					srv.redirectMu.Lock()
 					srv.redirectMap[key] = r.RequestURI
 					srv.redirectMu.Unlock()
@@ -498,7 +498,7 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
-	key := newHash(defaultHashSize)
+	key := newKey(defaultKeySize)
 	srv.sessionMu.Lock()
 	srv.sessions[key] = newSession()
 	srv.sessions[key].token = tok
@@ -595,7 +595,7 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 	pingURL := url.URL{
 		Scheme: "http",
 		Host:   strings.Split(r.Host, ":")[0] + fmt.Sprintf(":%d", tmpnb.port),
-		Path:   path.Join("/book", tmpnb.hash) + "/",
+		Path:   path.Join("/book", tmpnb.key) + "/",
 	}
 	log.Printf("ping target: %s", pingURL.String())
 	var resp *http.Response
@@ -696,7 +696,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			IdleConnTimeout: 30 * time.Second,
 		}
 	*/
-	handlerPath := path.Join("/book", tmpnb.hash) + "/"
+	handlerPath := path.Join("/book", tmpnb.key) + "/"
 	log.Printf("handler: %s", handlerPath)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		// Read the cookie for session information and compare the
@@ -897,10 +897,10 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		return a.Before(b)
 	})
 	fmt.Fprintf(w, "all notebooks:\n")
-	fmt.Fprintf(tw, "hash prefix\tdocker id\timage name\tlast accessed\texpires in\n")
+	fmt.Fprintf(tw, "key prefix\tdocker id\timage name\tlast accessed\texpires in\n")
 	for i := 0; i < len(nbs); i++ {
 		e := time.Until(nbs[i].lastAccessed.Add(srv.pool.containerLifetime))
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", nbs[i].hash[:8], nbs[i].id[:8], nbs[i].imageName, nbs[i].lastAccessed, e)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", nbs[i].key[:8], nbs[i].id[:8], nbs[i].imageName, nbs[i].lastAccessed, e)
 	}
 	tw.Flush()
 	fmt.Fprintln(w)

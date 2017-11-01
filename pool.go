@@ -48,8 +48,8 @@ type tempNotebook struct {
 	sync.Mutex
 	// id is the docker container id.
 	id string
-	// hash is  a random generated hash that is used in the path of the server.
-	hash string
+	// key is  a random generated key that is used in the path of the server.
+	key string
 	// imageName is the name of the image used to start the container
 	imageName string
 	// lastAccessed is when the container was used last.
@@ -158,11 +158,11 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 	return pool, nil
 }
 
-// defaultHashSize is used for the unique hash generation
-const defaultHashSize = 32
+// defaultKeySize is used for the unique key generation
+const defaultKeySize = 32
 
-// newHash makes a n byte hash and returns the hex encoding.
-func newHash(n int) string {
+// newKey makes a n byte key and returns the hex encoding.
+func newKey(n int) string {
 	b := make([]byte, n)
 	_, err := rand.Read(b[:])
 	if err != nil {
@@ -202,7 +202,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*temp
 		}
 	}
 
-	hash := newHash(defaultHashSize)
+	key := newKey(defaultKeySize)
 
 	port, err := p.portSet.Acquire()
 	if err != nil {
@@ -229,7 +229,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*temp
 			`--port`,
 			portString,
 			`--ip=0.0.0.0`,
-			fmt.Sprintf("--NotebookApp.base_url=%s", path.Join("/book", hash)),
+			fmt.Sprintf("--NotebookApp.base_url=%s", path.Join("/book", key)),
 			`--NotebookApp.port_retries=0`,
 			tokenArg,
 			`--NotebookApp.disable_check_xsrf=True`,
@@ -256,7 +256,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*temp
 	log.Printf("created container: %s", resp.ID)
 	t := &tempNotebook{
 		id:           resp.ID,
-		hash:         hash,
+		key:          key,
 		imageName:    image,
 		lastAccessed: time.Now(),
 		port:         port,
@@ -284,7 +284,7 @@ func (p *notebookPool) addNotebook(t *tempNotebook) error {
 	if n+1 > p.maxContainers {
 		return errNotebookPoolFull
 	}
-	p.containerMap[t.hash] = t
+	p.containerMap[t.key] = t
 	p.Unlock()
 	return nil
 }
@@ -318,7 +318,7 @@ func (p *notebookPool) activeNotebooks() []tempNotebook {
 		c := p.containerMap[k]
 		nbs[i] = tempNotebook{
 			id:           c.id,
-			hash:         c.hash,
+			key:          c.key,
 			imageName:    c.imageName,
 			lastAccessed: c.lastAccessed,
 			port:         c.port,
@@ -403,7 +403,7 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 			//trash = append(trash, *c)
 			trash = append(trash, tempNotebook{
 				id:           c.id,
-				hash:         c.hash,
+				key:          c.key,
 				imageName:    c.imageName,
 				lastAccessed: c.lastAccessed,
 				port:         c.port,
@@ -415,14 +415,14 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 	for i := 0; i < len(trash); i++ {
 		type nbCopy struct {
 			id           string
-			hash         string
+			key          string
 			imageName    string
 			lastAccessed time.Time
 			port         int
 		}
 		c := nbCopy{
 			id:           trash[i].id,
-			hash:         trash[i].hash,
+			key:          trash[i].key,
 			imageName:    trash[i].imageName,
 			lastAccessed: trash[i].lastAccessed,
 			port:         trash[i].port,
@@ -432,12 +432,12 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 			p.stopAndKillContainer(c.id)
 			p.portSet.Drop(c.port)
 			p.Lock()
-			delete(p.containerMap, c.hash)
+			delete(p.containerMap, c.key)
 			p.Unlock()
 			// This isn't very elegant, but we couldn't delete the pattern from the mux
 			// before, but now we can with the vendored/updated copy in mux.go.  We add
 			// a trailing slash when we register the path, so we must add it here too.
-			p.deregisterMux <- path.Join("/book", c.hash) + "/"
+			p.deregisterMux <- path.Join("/book", c.key) + "/"
 		}
 		if async {
 			go f(c)
