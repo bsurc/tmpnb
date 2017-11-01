@@ -861,6 +861,7 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	vm, _ := mem.VirtualMemory()
 	fmt.Fprintf(w, "Used memory: %d(%d MB)\n", vm.Used, vm.Used>>20)
 	fmt.Fprintf(w, "Free memory: %d(%d MB)\n", vm.Free, vm.Free>>20)
+	fmt.Fprintf(w, "Available memory: %d(%d MB)\n", vm.Available, vm.Available>>20)
 	t := srv.pool.NextCollection()
 	fmt.Fprintf(w, "Next container reclamation: %s (%s)\n", t, t.Sub(time.Now()))
 	// XXX: these are copies, they are local and we don't need to hold locks when
