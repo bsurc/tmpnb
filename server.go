@@ -60,12 +60,6 @@ func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
 
-var defaultServer = notebookServer{
-	ContainerLifetime: defaultContainerLifetime,
-	ImageRegexp:       allImageMatch,
-	MaxContainers:     defaultMaxContainers,
-}
-
 type session struct {
 	sync.Mutex
 	m     map[string]string
@@ -141,22 +135,22 @@ type notebookServer struct {
 	logWriter io.Writer
 
 	//Configuration options for the server
-	AccessLogfile      string        `json:"access_logfile"`
-	AssetPath          string        `json:"asset_path"`
-	ContainerLifetime  time.Duration `json:"container_lifetime"`
-	DisableJupyterAuth bool          `json:"disable_jupyter_auth"`
-	EnableCSP          bool          `json:"enable_csp"`
-	EnableDockerPush   bool          `json:"enable_docker_push"`
-	EnablePProf        bool          `json:"enable_pprof"`
-	ImageRegexp        string        `json:"image_regexp"`
-	MaxContainers      int           `json:"max_containers"`
-	Logfile            string        `json:"logfile"`
-	Port               string        `json:"port"`
-	Host               string        `json:"host"`
-	HTTPRedirect       bool          `json:"http_redirect"`
-	EnableACME         bool          `json:"enable_acme"`
-	TLSCert            string        `json:"tls_cert"`
-	TLSKey             string        `json:"tls_key"`
+	AccessLogfile      string `json:"access_logfile"`
+	AssetPath          string `json:"asset_path"`
+	ContainerLifetime  string `json:"container_lifetime"`
+	DisableJupyterAuth bool   `json:"disable_jupyter_auth"`
+	EnableCSP          bool   `json:"enable_csp"`
+	EnableDockerPush   bool   `json:"enable_docker_push"`
+	EnablePProf        bool   `json:"enable_pprof"`
+	ImageRegexp        string `json:"image_regexp"`
+	MaxContainers      int    `json:"max_containers"`
+	Logfile            string `json:"logfile"`
+	Port               string `json:"port"`
+	Host               string `json:"host"`
+	HTTPRedirect       bool   `json:"http_redirect"`
+	EnableACME         bool   `json:"enable_acme"`
+	TLSCert            string `json:"tls_cert"`
+	TLSKey             string `json:"tls_key"`
 	OAuthConfig        struct {
 		WhiteList []string `json:"whitelist"`
 		RegExp    string   `json:"match"`
@@ -167,7 +161,7 @@ type notebookServer struct {
 // configuration if supplied.
 func newNotebookServer(config string) (*notebookServer, error) {
 	srv := &notebookServer{
-		ContainerLifetime: defaultContainerLifetime,
+		ContainerLifetime: "10m",
 		ImageRegexp:       allImageMatch,
 		MaxContainers:     defaultMaxContainers,
 	}
@@ -203,7 +197,11 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	if srv.HTTPRedirect && srv.Port != "" {
 		return nil, fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port)
 	}
-	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, srv.ContainerLifetime)
+	lifetime, err := time.ParseDuration(srv.ContainerLifetime)
+	if err != nil {
+		return nil, err
+	}
+	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, lifetime)
 	if err != nil {
 		return nil, err
 	}

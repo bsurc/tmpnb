@@ -1,6 +1,6 @@
 {
   "asset_path": "./assets",
-  "container_lifetime": 120000000000,
+  "container_lifetime": "1m",
   "disable_jupyter_auth": false,
   "enable_acme": false,
   "enable_csp": false,
