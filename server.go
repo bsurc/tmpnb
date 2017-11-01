@@ -857,11 +857,15 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 }
 
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
+	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "Go version: %s\n", runtime.Version())
 	vm, _ := mem.VirtualMemory()
-	fmt.Fprintf(w, "Used memory: %d(%d MB)\n", vm.Used, vm.Used>>20)
-	fmt.Fprintf(w, "Free memory: %d(%d MB)\n", vm.Free, vm.Free>>20)
-	fmt.Fprintf(w, "Available memory: %d(%d MB)\n", vm.Available, vm.Available>>20)
+	fmt.Fprintf(w, "Memory Stats\n")
+	fmt.Fprintf(tw, "Type\tAmount\n")
+	fmt.Fprintf(tw, "Used:\t%d (%d MB)\n", vm.Used, vm.Used>>20)
+	fmt.Fprintf(tw, "Free:\t%d (%d MB)\n", vm.Free, vm.Free>>20)
+	fmt.Fprintf(tw, "Available:\t%d (%d MB)\n", vm.Available, vm.Available>>20)
+	tw.Flush()
 	t := srv.pool.NextCollection()
 	fmt.Fprintf(w, "Next container reclamation: %s (%s)\n", t, t.Sub(time.Now()))
 	// XXX: these are copies, they are local and we don't need to hold locks when
@@ -880,7 +884,6 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	sort.Slice(keys, func(i, j int) bool {
 		return keys[i] < keys[j]
 	})
-	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	for _, k := range keys {
 		fmt.Fprintf(tw, "%s\t%d\n", k, m[k])
 	}
