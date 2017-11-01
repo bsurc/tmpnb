@@ -379,7 +379,8 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 			w.Header().Set(cspKey, csp())
 		}
 		if srv.HTTPRedirect {
-			w.Header().Set("Strict-Transport-Security: max-age=31536000; includeSubDomains")
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 		if srv.enableOAuth {
 			c, err := r.Cookie(sessionKey)
 			if err == nil {
