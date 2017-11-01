@@ -945,7 +945,7 @@ func (srv *notebookServer) Start() {
 			// Only use curves which have assembly implementations
 			CurvePreferences: []tls.CurveID{
 				tls.CurveP256,
-				tls.X25519, // Go 1.8 only
+				tls.X25519,
 			},
 			// If you can take the compatibility loss of the Modern configuration, you
 			// should then also set MinVersion and CipherSuites.
