@@ -20,3 +20,4 @@ USER $NB_USER
 WORKDIR $HOME
 
 RUN wget "http://swcarpentry.github.io/shell-novice/data/shell-novice-data.zip"
+RUN wget "http://swcarpentry.github.io/python-novice-inflammation/data/python-novice-inflammation-data.zip"
