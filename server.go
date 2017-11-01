@@ -899,10 +899,14 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprintln(w)
 
 	qnbs := srv.pool.queuedNotebooks()
+	qmap := map[string]int{}
+	for _, q := range qnbs {
+		qmap[q.imageName]++
+	}
 	fmt.Fprintf(w, "queued notebooks:\n")
-	fmt.Fprintf(tw, "hash prefix\timage name\tlast accessed\texpires in\n")
-	for i := 0; i < len(qnbs); i++ {
-		fmt.Fprintf(tw, "%s\t%s\t\n", qnbs[i].hash[:8], qnbs[i].imageName)
+	fmt.Fprintf(tw, "image name\tcount\n")
+	for k, v := range qmap {
+		fmt.Fprintf(tw, "%s\t%d\n", k, v)
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
