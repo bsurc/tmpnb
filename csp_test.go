@@ -8,6 +8,6 @@ import "testing"
 
 func TestCSP(t *testing.T) {
 	if csp() != expCSP {
-		t.Errorf("invalid csp, got: %s, want: %s", csp, expCSP)
+		t.Errorf("invalid csp, got: %s, want: %s", csp(), expCSP)
 	}
 }

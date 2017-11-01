@@ -162,23 +162,21 @@ type notebookServer struct {
 	} `json:"oauth_confg"`
 }
 
-// readConfig reads json config from r
-func readConfig(r io.Reader) (*notebookServer, error) {
-	sc := defaultServer
-	err := json.NewDecoder(r).Decode(&sc)
-	return &sc, err
-}
-
 // newNotebookServer initializes a server and owned resources, using a
 // configuration if supplied.
 func newNotebookServer(config string) (*notebookServer, error) {
-	srv := &defaultServer
+	srv := &notebookServer{
+		ContainerLifetime: defaultContainerLifetime,
+		ImageRegexp:       allImageMatch,
+		MaxContainers:     defaultMaxContainers,
+	}
 	if config != "" {
 		fin, err := os.Open(config)
 		if err != nil {
 			return nil, err
 		}
-		srv, err = readConfig(fin)
+		err = json.NewDecoder(fin).Decode(srv)
+		fin.Close()
 		if err != nil {
 			return nil, err
 		}
