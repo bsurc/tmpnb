@@ -7,6 +7,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -57,12 +58,6 @@ const (
 
 func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
-}
-
-var defaultServer = notebookServer{
-	ContainerLifetime: defaultContainerLifetime,
-	ImageRegexp:       allImageMatch,
-	MaxContainers:     defaultMaxContainers,
 }
 
 type session struct {
@@ -140,44 +135,43 @@ type notebookServer struct {
 	logWriter io.Writer
 
 	//Configuration options for the server
-	AccessLogfile      string        `json:"access_logfile"`
-	AssetPath          string        `json:"asset_path"`
-	ContainerLifetime  time.Duration `json:"container_lifetime"`
-	DisableJupyterAuth bool          `json:"disable_jupyter_auth"`
-	EnableDockerPush   bool          `json:"enable_docker_push"`
-	EnablePProf        bool          `json:"enable_pprof"`
-	ImageRegexp        string        `json:"image_regexp"`
-	MaxContainers      int           `json:"max_containers"`
-	Logfile            string        `json:"logfile"`
-	Port               string        `json:"port"`
-	Host               string        `json:"host"`
-	HTTPRedirect       bool          `json:"http_redirect"`
-	EnableACME         bool          `json:"enable_acme"`
-	TLSCert            string        `json:"tls_cert"`
-	TLSKey             string        `json:"tls_key"`
+	AccessLogfile      string `json:"access_logfile"`
+	AssetPath          string `json:"asset_path"`
+	ContainerLifetime  string `json:"container_lifetime"`
+	DisableJupyterAuth bool   `json:"disable_jupyter_auth"`
+	EnableCSP          bool   `json:"enable_csp"`
+	EnableDockerPush   bool   `json:"enable_docker_push"`
+	EnablePProf        bool   `json:"enable_pprof"`
+	ImageRegexp        string `json:"image_regexp"`
+	MaxContainers      int    `json:"max_containers"`
+	Logfile            string `json:"logfile"`
+	Port               string `json:"port"`
+	Host               string `json:"host"`
+	HTTPRedirect       bool   `json:"http_redirect"`
+	EnableACME         bool   `json:"enable_acme"`
+	TLSCert            string `json:"tls_cert"`
+	TLSKey             string `json:"tls_key"`
 	OAuthConfig        struct {
 		WhiteList []string `json:"whitelist"`
 		RegExp    string   `json:"match"`
 	} `json:"oauth_confg"`
 }
 
-// readConfig reads json config from r
-func readConfig(r io.Reader) (*notebookServer, error) {
-	sc := defaultServer
-	err := json.NewDecoder(r).Decode(&sc)
-	return &sc, err
-}
-
 // newNotebookServer initializes a server and owned resources, using a
 // configuration if supplied.
 func newNotebookServer(config string) (*notebookServer, error) {
-	srv := &defaultServer
+	srv := &notebookServer{
+		ContainerLifetime: "10m",
+		ImageRegexp:       allImageMatch,
+		MaxContainers:     defaultMaxContainers,
+	}
 	if config != "" {
 		fin, err := os.Open(config)
 		if err != nil {
 			return nil, err
 		}
-		srv, err = readConfig(fin)
+		err = json.NewDecoder(fin).Decode(srv)
+		fin.Close()
 		if err != nil {
 			return nil, err
 		}
@@ -199,7 +193,15 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		}
 		log.SetOutput(srv.logWriter)
 	}
-	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, srv.ContainerLifetime)
+	// Disallow http -> https redirect if not using standard ports
+	if srv.HTTPRedirect && srv.Port != "" {
+		return nil, fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port)
+	}
+	lifetime, err := time.ParseDuration(srv.ContainerLifetime)
+	if err != nil {
+		return nil, err
+	}
+	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, lifetime)
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +298,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
+	srv.mux.Handle("/csp_report", http.HandlerFunc(srv.cspReportHandler))
 	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(srv.AssetPath))))
 	srv.mux.Handle("/stats", srv.accessLogHandler(http.HandlerFunc(srv.statsHandler)))
 	srv.mux.Handle("/status", srv.accessLogHandler(http.HandlerFunc(srv.statusHandler)))
@@ -369,6 +372,10 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 		var ok bool
 		var ses *session
 		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
+		// Set the CSP headers if enabled
+		if srv.EnableCSP {
+			w.Header().Set(cspKey, csp())
+		}
 		if srv.enableOAuth {
 			c, err := r.Cookie(sessionKey)
 			if err == nil {
@@ -428,6 +435,15 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 		h.ServeHTTP(w, r)
 	}
 	return http.HandlerFunc(f)
+}
+
+func (srv *notebookServer) cspReportHandler(w http.ResponseWriter, r *http.Request) {
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	log.Print(string(body))
 }
 
 func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) {
@@ -911,20 +927,49 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 func (srv *notebookServer) Start() {
 	if (srv.TLSCert != "" && srv.TLSKey != "") || srv.EnableACME {
 		if srv.HTTPRedirect {
-			httpServer := http.Server{}
-			httpMux := http.NewServeMux()
-			httpMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				u := *r.URL
-				u.Scheme = "https"
-				u.Host = r.Host
-				r.ParseForm()
-				u.RawPath = r.Form.Encode()
-				http.Redirect(w, r, u.String(), http.StatusPermanentRedirect)
-			})
-			httpServer.Handler = httpMux
+			httpServer := http.Server{
+				ReadTimeout:  5 * time.Second,
+				WriteTimeout: 5 * time.Second,
+				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					u := *r.URL
+					u.Scheme = "https"
+					u.Host = r.Host
+					r.ParseForm()
+					u.RawPath = r.Form.Encode()
+					w.Header().Set("Connection", "close")
+					http.Redirect(w, r, u.String(), http.StatusPermanentRedirect)
+				}),
+			}
 			go func() {
 				log.Fatal(httpServer.ListenAndServe())
 			}()
+		}
+		// Straight outta https://blog.cloudflare.com/exposing-go-on-the-internet/
+		srv.Server.TLSConfig = &tls.Config{
+			// Causes servers to use Go's default ciphersuite preferences,
+			// which are tuned to avoid attacks. Does nothing on clients.
+			PreferServerCipherSuites: true,
+			// Only use curves which have assembly implementations
+			CurvePreferences: []tls.CurveID{
+				tls.CurveP256,
+				tls.X25519,
+			},
+			// If you can take the compatibility loss of the Modern configuration, you
+			// should then also set MinVersion and CipherSuites.
+			MinVersion: tls.VersionTLS12,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+
+				// Best disabled, as they don't provide Forward Secrecy,
+				// but might be necessary for some clients
+				// tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+				// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+			},
 		}
 		if srv.EnableACME {
 			log.Print("using acme via letsencrypt")
