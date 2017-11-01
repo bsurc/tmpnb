@@ -1,9 +1,10 @@
 {
   "asset_path": "./assets",
-  "container_lifetime": 20000000000,
+  "container_lifetime": "1m",
   "disable_jupyter_auth": false,
-  "enable_acme": true,
-  "enable_docker_push": true,
+  "enable_acme": false,
+  "enable_csp": false,
+  "enable_docker_push": false,
   "enable_pprof": true,
   "image_regexp": ".*",
   "access_logfile": "",
@@ -19,6 +20,6 @@
     "whitelist": [
       "kyleshannon@boisestate.edu"
     ],
-    "match": "bsu"
+    "match": ""
   }
 }

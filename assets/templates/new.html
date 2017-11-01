@@ -1,26 +1,11 @@
 {{define "new"}}
 {{template "header"}}
+<p id=container hidden>{{.ID}}</p>
+<p id=path hidden> {{.Path}}</p>
+<p id=token hidden>{{.Token}}</p>
 <div>
  <p id="status">Building your container...</p>
 </div>
-<script>
-var containerID = {{.ID}};
-xhr = new XMLHttpRequest();
-//var url = "/status?ping&container="+containerID;
-var url = "/status?ping=yes&container="+containerID;
-xhr.open("GET", url, true);
-xhr.send(url);
-xhr.onreadystatechange = function () {
- if(xhr.readyState === 4 && xhr.status === 200) {
-  console.log("container built");
-  var link = "<a href={{.Path}}?token={{.Token}}>Click here to launch your container</a>";
-  document.getElementById("status").innerHTML = link;
- } else {
-  console.log(xhr.status);
- }
-}
-setTimeout(xhr.onreadystatechange, 120000);
-</script>
-<!-- TODO(kyle): display error message on failure to ping -->
+<script src="/static/new.js"></script>
 {{template "footer"}}
 {{end}}
