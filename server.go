@@ -859,7 +859,10 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// statsHandler reports statistics for the server.  It apparently leaks file
+// descriptors.  return immediately for now, until we can fix.
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
+	return
 	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "Go version: %s\n", runtime.Version())
 	vm, _ := mem.VirtualMemory()
