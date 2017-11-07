@@ -6,6 +6,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -116,6 +117,10 @@ type notebookServer struct {
 	oauthMatch *regexp.Regexp
 	// oauthWhiteList is automagically enabled user emails
 	oauthWhiteList map[string]struct{}
+	// buildMu guards buildMap
+	buildMu sync.Mutex
+	// buildMap holds names of images currently being built
+	buildMap map[string]struct{}
 	// redirectLock locks the redirectMap
 	redirectMu sync.Mutex
 	// redirectMap handles initial incoming requests before the user is
@@ -281,6 +286,8 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		srv.oauthWhiteList[s] = struct{}{}
 		log.Println(s)
 	}
+
+	srv.buildMap = map[string]struct{}{}
 
 	srv.redirectMap = map[string]string{}
 
@@ -785,6 +792,172 @@ func (srv *notebookServer) privacyHandler(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		log.Print(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		return
+	}
+
+	// ping okay
+	if r.Header.Get("X-GitHub-Event") == "ping" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Header.Get("Content-Type") != "application/json" ||
+		r.Header.Get("X-GitHub-Event") != "push" ||
+		!strings.HasPrefix(r.UserAgent(), "GitHub-Hookshot/") {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	var push githubPush
+	err := json.NewDecoder(r.Body).Decode(&push)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// TODO(kyle): check signature/secret/HMAC
+
+	// If any of the docker/$PI_NAME/Dockerfile has changes, do a git pull,
+	// docker build, and push it to docker hub.  Then the others can pull the
+	// image straight from docker hub with the docker push hook.
+	var build []string
+	var remove []string
+	for _, commit := range push.Commits {
+		allChanges := append(commit.Added, commit.Modified...)
+		for _, file := range allChanges {
+			if strings.HasSuffix(file, "Dockerfile") {
+				build = append(build, file)
+			}
+		}
+		for _, file := range commit.Removed {
+			if strings.HasSuffix(file, "Dockerfile") {
+				remove = append(remove, file)
+			}
+		}
+	}
+	if build == nil && remove == nil {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	for _, d := range build {
+		dockerfile := d
+		tempDir, err := ioutil.TempDir("", "tmpnb")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Print(err)
+			return
+		}
+		//defer os.RemoveAll(tempDir)
+		// Grab the most recent Dockerfile
+		u := url.URL{
+			Scheme: "https",
+			Host:   "github.com",
+			Path:   filepath.Join("/bsurc/tmpnb/raw/master", dockerfile),
+		}
+		resp, err := http.Get(u.String())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Print(err)
+			return
+		}
+		body, err := ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Print(err)
+			return
+		}
+		fout, err := os.Create(filepath.Join(tempDir, "Dockerfile"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Print(err)
+		}
+		_, err = io.Copy(fout, bytes.NewBuffer(body))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Print(err)
+			return
+		}
+		// TODO(kyle): check for err
+		err = fout.Close()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Print(err)
+			return
+		}
+		cli, err := client.NewEnvClient()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Print(err)
+			return
+		}
+		ctx := context.Background()
+		tag := "boisestate/" + strings.Split(dockerfile, "/")[1]
+		buildResp, err := cli.ImageBuild(ctx, nil, types.ImageBuildOptions{
+			Tags:           []string{tag + ":latest"},
+			SuppressOutput: false,
+			//RemoteContext  string
+			//NoCache        bool
+			Remove: true,
+			//ForceRemove    bool
+			//PullParent     bool
+			//Isolation      container.Isolation
+			//CPUSetCPUs     string
+			//CPUSetMems     string
+			//CPUShares      int64
+			//CPUQuota       int64
+			//CPUPeriod      int64
+			//Memory         int64
+			//MemorySwap     int64
+			//CgroupParent   string
+			//NetworkMode    string
+			//ShmSize        int64
+			Dockerfile: filepath.Join(tempDir, "Dockerfile"),
+			//Ulimits        []*units.Ulimit
+			// BuildArgs needs to be a *string instead of just a string so that
+			// we can tell the difference between "" (empty string) and no value
+			// at all (nil). See the parsing of buildArgs in
+			// api/server/router/build/build_routes.go for even more info.
+			//BuildArgs   map[string]*string
+			//AuthConfigs map[string]AuthConfig
+			//Context     io.Reader
+			//Labels      map[string]string
+			// squash the resulting image's layers to the parent
+			// preserves the original image and creates a new one from the parent with all
+			// the changes applied to a single layer
+			//Squash bool
+			// CacheFrom specifies images that are used for matching cache. Images
+			// specified here do not need to have a valid parent chain to match cache.
+			//CacheFrom   []string
+			//SecurityOpt []string
+			//ExtraHosts  []string // List of extra hosts
+			//Target      string
+			//SessionID   string
+			//Platform    string
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			fmt.Println(err)
+			return
+		}
+		buildResp.Body.Close()
+		// If everything went okay, push to docker hub
+		pushResponse, err := cli.ImagePush(ctx, tag+":latest",
+			types.ImagePushOptions{
+				All:           true,
+				RegistryAuth:  "", // RegistryAuth is the base64 encoded credentials for the registry
+				PrivilegeFunc: nil,
+			})
+		pushResponse.Close()
+		if err != nil {
+			log.Print(err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 }
 

@@ -5,6 +5,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"testing"
 )
@@ -32,5 +36,38 @@ func TestBSURegexp(t *testing.T) {
 		if re.MatchString(test.s) != test.match {
 			t.Errorf("mismatch %s match should be %t", test.s, test.match)
 		}
+	}
+}
+
+func TestGithubPush(t *testing.T) {
+	if testing.Short() {
+		t.Skip(skipDocker)
+	}
+	var push githubPush
+	push.Commits = make([]githubPushCommit, 1)
+	push.Commits[0].Added = []string{"docker/snakemake/Dockerfile"}
+	srv := &notebookServer{}
+	ts := httptest.NewServer(http.HandlerFunc(srv.githubPushHandler))
+	defer ts.Close()
+	tc := ts.Client()
+	var b bytes.Buffer
+	err := json.NewEncoder(&b).Encode(push)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL, &b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "GitHub-Hookshot/")
+	req.Header.Set("X-GitHub-Event", "push")
+
+	resp, err := tc.Do(req)
+	if err != nil {
+		t.Error(err)
+	} else {
+		t.Log(resp.Status)
 	}
 }
