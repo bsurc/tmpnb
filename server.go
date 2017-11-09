@@ -216,7 +216,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 						w := gzip.NewWriter(fout)
 						fin, err := os.Open(fname)
 						if err != nil {
-							log.Println(err)
+							log.Print(err)
 							fout.Close()
 							continue
 						}
@@ -324,16 +324,16 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			}
 		}
 	}
-	log.Println("OAuth2 whitelist:")
+	log.Print("OAuth2 whitelist:")
 	srv.oauthWhiteList = map[string]struct{}{}
 	for _, s := range srv.OAuthConfig.WhiteList {
 		srv.oauthWhiteList[s] = struct{}{}
-		log.Println(s)
+		log.Print(s)
 	}
 
 	srv.redirectMap = map[string]string{}
 
-	log.Println("OAuth2 regexp:", srv.OAuthConfig.RegExp)
+	log.Print("OAuth2 regexp:", srv.OAuthConfig.RegExp)
 
 	// Docker push support
 	srv.enableDockerPush = srv.EnableDockerPush
@@ -382,13 +382,13 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	signal.Notify(quit, os.Interrupt)
 	go func() {
 		<-quit
-		log.Println("Shutting down server...")
+		log.Print("Shutting down server...")
 		err := srv.pool.releaseContainers(true, false)
 		if err != nil {
 			log.Print(err)
 		}
 		if c, ok := srv.logWriter.(io.Closer); ok {
-			log.Println("closing log file")
+			log.Print("closing log file")
 			err = c.Close()
 			// If we hit an error, dump it to stdout.
 			log.SetOutput(os.Stdout)
@@ -397,7 +397,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			}
 		}
 		if c, ok := srv.accessLogWriter.(io.Closer); ok {
-			log.Println("closing log file")
+			log.Print("closing log file")
 			err = c.Close()
 			// If we hit an error, dump it to stdout.
 			if err != nil {
@@ -668,7 +668,7 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		status = resp.StatusCode
 		switch status {
 		case http.StatusOK, http.StatusFound:
-			log.Println("container pinged successfully")
+			log.Print("container pinged successfully")
 			status = http.StatusOK
 			goto found
 		}
