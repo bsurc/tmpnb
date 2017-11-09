@@ -6,6 +6,7 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -148,6 +149,7 @@ type notebookServer struct {
 	MaxContainers      int    `json:"max_containers"`
 	Logfile            string `json:"logfile"`
 	Port               string `json:"port"`
+	RotateLogs         bool   `json:"rotate_logs"`
 	Host               string `json:"host"`
 	HTTPRedirect       bool   `json:"http_redirect"`
 	EnableACME         bool   `json:"enable_acme"`
@@ -195,6 +197,53 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		}
 		log.SetOutput(srv.logWriter)
 	}
+	// Set up some basic log rotation
+	if (srv.AccessLogfile != "" || srv.Logfile != "") && srv.RotateLogs {
+		t := time.NewTicker(time.Hour * 24 * 14)
+		go func() {
+			for {
+				select {
+				case <-t.C:
+					for _, fname := range []string{srv.AccessLogfile, srv.Logfile} {
+						if fname == "" {
+							continue
+						}
+						fout, err := os.Create(fname + "." + time.Now().Format("20060102150405") + ".gz")
+						if err != nil {
+							log.Print(err)
+							continue
+						}
+						w := gzip.NewWriter(fout)
+						fin, err := os.Open(fname)
+						if err != nil {
+							log.Println(err)
+							fout.Close()
+							continue
+						}
+						_, err = io.Copy(w, fin)
+						w.Flush()
+						w.Close()
+						fout.Close()
+						fin.Close()
+						os.Truncate(fname, 0)
+						logs, err := filepath.Glob(fname + "*" + ".gz")
+						if err != nil {
+							log.Print(err)
+							continue
+						}
+						sort.Strings(logs)
+						for len(logs) > 5 {
+							err = os.Remove(logs[0])
+							logs = logs[1:]
+						}
+					}
+				default:
+					time.Sleep(time.Hour * 24)
+				}
+			}
+		}()
+	}
+
 	// Disallow http -> https redirect if not using standard ports
 	if srv.HTTPRedirect && srv.Port != "" {
 		return nil, fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port)
