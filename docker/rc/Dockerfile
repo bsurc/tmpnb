@@ -11,4 +11,4 @@ USER $NB_USER
 
 WORKDIR $HOME
 
-RUN echo "Hello, world!\n" > hello.txt
+RUN echo "Hello, world!!\n" > hello.txt
