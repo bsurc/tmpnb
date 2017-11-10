@@ -354,6 +354,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
 	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
+	srv.mux.Handle("/github/push/", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
@@ -901,6 +902,18 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	for _, r := range remove {
+		_ = r
+		/*
+			ctx := context.Background()
+			cli, err := client.NewEnvClient()
+			resp, err := cli.ImageRemove(ctx, imageID string, options types.ImageRemoveOptions)
+			srv.pool.Lock()
+			delete(srv.pool.availableImages[tag])
+			srv.pool.Unlock()
+		*/
+	}
+
 	for _, d := range build {
 		dockerfile := d
 		u := url.URL{
@@ -942,9 +955,11 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		tag := "boisestate/" + strings.Split(dockerfile, "/")[1] + "-notebook:latest"
-		srv.buildMu.Lock()
-		srv.buildMap[tag] = struct{}{}
-		srv.buildMu.Unlock()
+		/*
+			srv.buildMu.Lock()
+			srv.buildMap[tag] = struct{}{}
+			srv.buildMu.Unlock()
+		*/
 		cli, err := client.NewEnvClient()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -955,7 +970,7 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 		buildResp, err := cli.ImageBuild(ctx, buf, types.ImageBuildOptions{
 			Tags:           []string{tag},
 			Context:        buf,
-			SuppressOutput: false,
+			SuppressOutput: true,
 			PullParent:     true,
 			//BuildArgs   map[string]*string
 			//Target      string
@@ -968,8 +983,6 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 			srv.buildMu.Unlock()
 			return
 		}
-		// we need a sink here to wait for the build to finish
-		io.Copy(os.Stdout, buildResp.Body)
 		buildResp.Body.Close()
 		srv.buildMu.Lock()
 		delete(srv.buildMap, tag)
