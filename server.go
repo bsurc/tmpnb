@@ -892,6 +892,10 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 			log.Print(err)
 			return
 		}
+		tag := "boisestate/" + strings.Split(dockerfile, "/")[1] + "-notebook:latest"
+		srv.buildMu.Lock()
+		srv.buildMap[tag] = struct{}{}
+		srv.buildMu.Unlock()
 		cli, err := client.NewEnvClient()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -899,12 +903,6 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		ctx := context.Background()
-		tag := "boisestate/" + strings.Split(dockerfile, "/")[1] + "-notebook:latest"
-		/*
-			srv.buildMu.Lock()
-			srv.buildMap[tag] = struct{}{}
-			srv.buildMu.Unlock()
-		*/
 		buildResp, err := cli.ImageBuild(ctx, buf, types.ImageBuildOptions{
 			Tags:           []string{tag},
 			Context:        buf,
