@@ -354,7 +354,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
 	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
-	srv.mux.Handle("/github/push/", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
+	srv.mux.Handle("/github/push/", http.HandlerFunc(srv.listImagesHandler))
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
@@ -955,11 +955,9 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		tag := "boisestate/" + strings.Split(dockerfile, "/")[1] + "-notebook:latest"
-		/*
-			srv.buildMu.Lock()
-			srv.buildMap[tag] = struct{}{}
-			srv.buildMu.Unlock()
-		*/
+		srv.buildMu.Lock()
+		srv.buildMap[tag] = struct{}{}
+		srv.buildMu.Unlock()
 		cli, err := client.NewEnvClient()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
