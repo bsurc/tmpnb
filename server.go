@@ -856,7 +856,7 @@ func (srv *notebookServer) privacyHandler(w http.ResponseWriter, r *http.Request
 
 func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -868,13 +868,14 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 	if r.Header.Get("Content-Type") != "application/json" ||
 		r.Header.Get("X-GitHub-Event") != "push" ||
 		!strings.HasPrefix(r.UserAgent(), "GitHub-Hookshot/") {
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	var push githubPush
 	err := json.NewDecoder(r.Body).Decode(&push)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Print(err)
 		return
 	}
 	// TODO(kyle): check signature/secret/HMAC
@@ -923,14 +924,14 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 		}
 		resp, err := http.Get(u.String())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
 			log.Print(err)
 			return
 		}
 		body, err := ioutil.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
 			log.Print(err)
 			return
 		}
@@ -944,13 +945,13 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 		tw.WriteHeader(h)
 		_, err = tw.Write(body)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
 			log.Print(err)
 			return
 		}
 		err = tw.Close()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
 			log.Print(err)
 			return
 		}
@@ -960,7 +961,7 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 		srv.buildMu.Unlock()
 		cli, err := client.NewEnvClient()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
 			log.Print(err)
 			return
 		}
@@ -975,7 +976,7 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 		})
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
 			srv.buildMu.Lock()
 			delete(srv.buildMap, tag)
 			srv.buildMu.Unlock()
