@@ -10,3 +10,5 @@ MAINTAINER Kyle Shannon <kyle@pobox.com>
 USER $NB_USER
 
 WORKDIR $HOME
+
+RUN echo "Hello, world!\n" > hello.txt
