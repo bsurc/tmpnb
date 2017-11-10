@@ -5,6 +5,7 @@
 package main
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
@@ -680,6 +681,14 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 
 	_, pull := r.Form["pull"]
 
+	srv.buildMu.Lock()
+	_, ok := srv.buildMap[imageName]
+	srv.buildMu.Unlock()
+	if ok {
+		http.Error(w, "image is currently being re-built", http.StatusServiceUnavailable)
+		return
+	}
+
 	tmpnb, err := srv.pool.newNotebook(imageName, pull, email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -845,14 +854,6 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 
 	for _, d := range build {
 		dockerfile := d
-		tempDir, err := ioutil.TempDir("", "tmpnb")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			log.Print(err)
-			return
-		}
-		//defer os.RemoveAll(tempDir)
-		// Grab the most recent Dockerfile
 		u := url.URL{
 			Scheme: "https",
 			Host:   "github.com",
@@ -871,19 +872,21 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 			log.Print(err)
 			return
 		}
-		fout, err := os.Create(filepath.Join(tempDir, "Dockerfile"))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			log.Print(err)
+		buf := new(bytes.Buffer)
+		tw := tar.NewWriter(buf)
+		h := &tar.Header{
+			Name:     "Dockerfile",
+			Size:     int64(len(body)),
+			Typeflag: tar.TypeReg,
 		}
-		_, err = io.Copy(fout, bytes.NewBuffer(body))
+		tw.WriteHeader(h)
+		_, err = tw.Write(body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			log.Print(err)
 			return
 		}
-		// TODO(kyle): check for err
-		err = fout.Close()
+		err = tw.Close()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			log.Print(err)
@@ -896,68 +899,34 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		ctx := context.Background()
-		tag := "boisestate/" + strings.Split(dockerfile, "/")[1]
-		buildResp, err := cli.ImageBuild(ctx, nil, types.ImageBuildOptions{
-			Tags:           []string{tag + ":latest"},
+		tag := "boisestate/" + strings.Split(dockerfile, "/")[1] + "-notebook:latest"
+		/*
+			srv.buildMu.Lock()
+			srv.buildMap[tag] = struct{}{}
+			srv.buildMu.Unlock()
+		*/
+		buildResp, err := cli.ImageBuild(ctx, buf, types.ImageBuildOptions{
+			Tags:           []string{tag},
+			Context:        buf,
 			SuppressOutput: false,
-			//RemoteContext  string
-			//NoCache        bool
-			Remove: true,
-			//ForceRemove    bool
-			//PullParent     bool
-			//Isolation      container.Isolation
-			//CPUSetCPUs     string
-			//CPUSetMems     string
-			//CPUShares      int64
-			//CPUQuota       int64
-			//CPUPeriod      int64
-			//Memory         int64
-			//MemorySwap     int64
-			//CgroupParent   string
-			//NetworkMode    string
-			//ShmSize        int64
-			Dockerfile: filepath.Join(tempDir, "Dockerfile"),
-			//Ulimits        []*units.Ulimit
-			// BuildArgs needs to be a *string instead of just a string so that
-			// we can tell the difference between "" (empty string) and no value
-			// at all (nil). See the parsing of buildArgs in
-			// api/server/router/build/build_routes.go for even more info.
+			PullParent:     true,
 			//BuildArgs   map[string]*string
-			//AuthConfigs map[string]AuthConfig
-			//Context     io.Reader
-			//Labels      map[string]string
-			// squash the resulting image's layers to the parent
-			// preserves the original image and creates a new one from the parent with all
-			// the changes applied to a single layer
-			//Squash bool
-			// CacheFrom specifies images that are used for matching cache. Images
-			// specified here do not need to have a valid parent chain to match cache.
-			//CacheFrom   []string
-			//SecurityOpt []string
-			//ExtraHosts  []string // List of extra hosts
 			//Target      string
-			//SessionID   string
-			//Platform    string
 		})
+
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			fmt.Println(err)
+			srv.buildMu.Lock()
+			delete(srv.buildMap, tag)
+			srv.buildMu.Unlock()
 			return
 		}
+		// we need a sink here to wait for the build to finish
+		io.Copy(os.Stdout, buildResp.Body)
 		buildResp.Body.Close()
-		// If everything went okay, push to docker hub
-		pushResponse, err := cli.ImagePush(ctx, tag+":latest",
-			types.ImagePushOptions{
-				All:           true,
-				RegistryAuth:  "", // RegistryAuth is the base64 encoded credentials for the registry
-				PrivilegeFunc: nil,
-			})
-		pushResponse.Close()
-		if err != nil {
-			log.Print(err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		srv.buildMu.Lock()
+		delete(srv.buildMap, tag)
+		srv.buildMu.Unlock()
 	}
 }
 
