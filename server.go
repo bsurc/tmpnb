@@ -920,7 +920,8 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 		u := url.URL{
 			Scheme: "https",
 			Host:   "github.com",
-			Path:   filepath.Join("/bsurc/tmpnb/raw/master", dockerfile),
+			// FIXME(kyle): branch may not be master or xxx
+			Path: filepath.Join("/bsurc/tmpnb/raw/", "git-push", dockerfile),
 		}
 		resp, err := http.Get(u.String())
 		if err != nil {
