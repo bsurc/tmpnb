@@ -915,78 +915,77 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 		*/
 	}
 
+	w.WriteHeader(http.StatusOK)
 	for _, d := range build {
-		dockerfile := d
-		u := url.URL{
-			Scheme: "https",
-			Host:   "github.com",
-			// FIXME(kyle): branch may not be master or xxx
-			Path: filepath.Join("/bsurc/tmpnb/raw/", "git-push", dockerfile),
-		}
-		resp, err := http.Get(u.String())
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			log.Print(err)
-			return
-		}
-		body, err := ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			log.Print(err)
-			return
-		}
-		buf := new(bytes.Buffer)
-		tw := tar.NewWriter(buf)
-		h := &tar.Header{
-			Name:     "Dockerfile",
-			Size:     int64(len(body)),
-			Typeflag: tar.TypeReg,
-		}
-		tw.WriteHeader(h)
-		_, err = tw.Write(body)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			log.Print(err)
-			return
-		}
-		err = tw.Close()
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			log.Print(err)
-			return
-		}
-		tag := "boisestate/" + strings.Split(dockerfile, "/")[1] + "-notebook:latest"
-		srv.buildMu.Lock()
-		srv.buildMap[tag] = struct{}{}
-		srv.buildMu.Unlock()
-		cli, err := client.NewEnvClient()
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			log.Print(err)
-			return
-		}
-		ctx := context.Background()
-		buildResp, err := cli.ImageBuild(ctx, buf, types.ImageBuildOptions{
-			Tags:           []string{tag},
-			Context:        buf,
-			SuppressOutput: true,
-			PullParent:     true,
-			//BuildArgs   map[string]*string
-			//Target      string
-		})
+		go func() {
+			dockerfile := d
+			u := url.URL{
+				Scheme: "https",
+				Host:   "github.com",
+				// FIXME(kyle): branch may not be master or xxx
+				Path: filepath.Join("/bsurc/tmpnb/raw/", "git-push", dockerfile),
+			}
+			resp, err := http.Get(u.String())
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				log.Print(err)
+				return
+			}
+			body, err := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				log.Print(err)
+				return
+			}
+			buf := new(bytes.Buffer)
+			tw := tar.NewWriter(buf)
+			h := &tar.Header{
+				Name:     "Dockerfile",
+				Size:     int64(len(body)),
+				Typeflag: tar.TypeReg,
+			}
+			tw.WriteHeader(h)
+			_, err = tw.Write(body)
+			if err != nil {
+				log.Print(err)
+				return
+			}
+			err = tw.Close()
+			if err != nil {
+				log.Print(err)
+				return
+			}
+			tag := "boisestate/" + strings.Split(dockerfile, "/")[1] + "-notebook:latest"
+			srv.buildMu.Lock()
+			srv.buildMap[tag] = struct{}{}
+			srv.buildMu.Unlock()
+			cli, err := client.NewEnvClient()
+			if err != nil {
+				log.Print(err)
+				return
+			}
+			ctx := context.Background()
+			buildResp, err := cli.ImageBuild(ctx, buf, types.ImageBuildOptions{
+				Tags:           []string{tag},
+				Context:        buf,
+				SuppressOutput: true,
+				PullParent:     true,
+				//BuildArgs   map[string]*string
+				//Target      string
+			})
 
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				srv.buildMu.Lock()
+				delete(srv.buildMap, tag)
+				srv.buildMu.Unlock()
+				return
+			}
+			buildResp.Body.Close()
 			srv.buildMu.Lock()
 			delete(srv.buildMap, tag)
 			srv.buildMu.Unlock()
-			return
-		}
-		buildResp.Body.Close()
-		srv.buildMu.Lock()
-		delete(srv.buildMap, tag)
-		srv.buildMu.Unlock()
+		}()
 	}
 }
 
