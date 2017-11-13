@@ -35,7 +35,7 @@ var (
 		"report-uri":      []string{"/csp_report"},
 		"child-src":       nil,
 		"form-action":     nil,
-		"frame-ancestors": nil,
+		"frame-ancestors": []string{"'none'"},
 		"plugin-types":    nil,
 	}
 	sortedCSPKeys []string

@@ -6,6 +6,7 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -148,6 +149,7 @@ type notebookServer struct {
 	MaxContainers      int    `json:"max_containers"`
 	Logfile            string `json:"logfile"`
 	Port               string `json:"port"`
+	RotateLogs         bool   `json:"rotate_logs"`
 	Host               string `json:"host"`
 	HTTPRedirect       bool   `json:"http_redirect"`
 	EnableACME         bool   `json:"enable_acme"`
@@ -195,6 +197,53 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		}
 		log.SetOutput(srv.logWriter)
 	}
+	// Set up some basic log rotation
+	if (srv.AccessLogfile != "" || srv.Logfile != "") && srv.RotateLogs {
+		t := time.NewTicker(time.Hour * 24 * 14)
+		go func() {
+			for {
+				select {
+				case <-t.C:
+					for _, fname := range []string{srv.AccessLogfile, srv.Logfile} {
+						if fname == "" {
+							continue
+						}
+						fout, err := os.Create(fname + "." + time.Now().Format("20060102150405") + ".gz")
+						if err != nil {
+							log.Print(err)
+							continue
+						}
+						w := gzip.NewWriter(fout)
+						fin, err := os.Open(fname)
+						if err != nil {
+							log.Print(err)
+							fout.Close()
+							continue
+						}
+						_, err = io.Copy(w, fin)
+						w.Flush()
+						w.Close()
+						fout.Close()
+						fin.Close()
+						os.Truncate(fname, 0)
+						logs, err := filepath.Glob(fname + "*" + ".gz")
+						if err != nil {
+							log.Print(err)
+							continue
+						}
+						sort.Strings(logs)
+						for len(logs) > 5 {
+							err = os.Remove(logs[0])
+							logs = logs[1:]
+						}
+					}
+				default:
+					time.Sleep(time.Hour * 24)
+				}
+			}
+		}()
+	}
+
 	// Disallow http -> https redirect if not using standard ports
 	if srv.HTTPRedirect && srv.Port != "" {
 		return nil, fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port)
@@ -207,7 +256,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	tkn := newHash(defaultHashSize)
+	tkn := newKey(defaultKeySize)
 	srv.pool = p
 	srv.token = tkn
 	srv.pool.token = tkn
@@ -263,7 +312,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			},
 			Endpoint: google.Endpoint,
 		}
-		srv.oauthState = newHash(defaultHashSize)
+		srv.oauthState = newKey(defaultKeySize)
 		switch srv.OAuthConfig.RegExp {
 		case "bsu":
 			srv.oauthMatch = regexp.MustCompile(bsuRegexp)
@@ -275,16 +324,16 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			}
 		}
 	}
-	log.Println("OAuth2 whitelist:")
+	log.Print("OAuth2 whitelist:")
 	srv.oauthWhiteList = map[string]struct{}{}
 	for _, s := range srv.OAuthConfig.WhiteList {
 		srv.oauthWhiteList[s] = struct{}{}
-		log.Println(s)
+		log.Print(s)
 	}
 
 	srv.redirectMap = map[string]string{}
 
-	log.Println("OAuth2 regexp:", srv.OAuthConfig.RegExp)
+	log.Print("OAuth2 regexp:", srv.OAuthConfig.RegExp)
 
 	// Docker push support
 	srv.enableDockerPush = srv.EnableDockerPush
@@ -333,13 +382,13 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	signal.Notify(quit, os.Interrupt)
 	go func() {
 		<-quit
-		log.Println("Shutting down server...")
+		log.Print("Shutting down server...")
 		err := srv.pool.releaseContainers(true, false)
 		if err != nil {
 			log.Print(err)
 		}
 		if c, ok := srv.logWriter.(io.Closer); ok {
-			log.Println("closing log file")
+			log.Print("closing log file")
 			err = c.Close()
 			// If we hit an error, dump it to stdout.
 			log.SetOutput(os.Stdout)
@@ -348,7 +397,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			}
 		}
 		if c, ok := srv.accessLogWriter.(io.Closer); ok {
-			log.Println("closing log file")
+			log.Print("closing log file")
 			err = c.Close()
 			// If we hit an error, dump it to stdout.
 			if err != nil {
@@ -378,6 +427,9 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 		if srv.EnableCSP {
 			w.Header().Set(cspKey, csp())
 		}
+		if srv.HTTPRedirect {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 		if srv.enableOAuth {
 			c, err := r.Cookie(sessionKey)
 			if err == nil {
@@ -402,7 +454,7 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 				case "/", "/about", "/list", "/privacy", "/stats":
 					break
 				default:
-					key := newHash(defaultHashSize)
+					key := newKey(defaultKeySize)
 					srv.redirectMu.Lock()
 					srv.redirectMap[key] = r.RequestURI
 					srv.redirectMu.Unlock()
@@ -498,7 +550,7 @@ func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
-	key := newHash(defaultHashSize)
+	key := newKey(defaultKeySize)
 	srv.sessionMu.Lock()
 	srv.sessions[key] = newSession()
 	srv.sessions[key].token = tok
@@ -595,7 +647,7 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 	pingURL := url.URL{
 		Scheme: "http",
 		Host:   strings.Split(r.Host, ":")[0] + fmt.Sprintf(":%d", tmpnb.port),
-		Path:   path.Join("/book", tmpnb.hash) + "/",
+		Path:   path.Join("/book", tmpnb.key) + "/",
 	}
 	log.Printf("ping target: %s", pingURL.String())
 	var resp *http.Response
@@ -616,7 +668,7 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		status = resp.StatusCode
 		switch status {
 		case http.StatusOK, http.StatusFound:
-			log.Println("container pinged successfully")
+			log.Print("container pinged successfully")
 			status = http.StatusOK
 			goto found
 		}
@@ -696,7 +748,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			IdleConnTimeout: 30 * time.Second,
 		}
 	*/
-	handlerPath := path.Join("/book", tmpnb.hash) + "/"
+	handlerPath := path.Join("/book", tmpnb.key) + "/"
 	log.Printf("handler: %s", handlerPath)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		// Read the cookie for session information and compare the
@@ -856,11 +908,20 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// statsHandler reports statistics for the server.  It apparently leaks file
+// descriptors.  return immediately for now, until we can fix.
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
+	return
+	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "Go version: %s\n", runtime.Version())
 	vm, _ := mem.VirtualMemory()
-	fmt.Fprintf(w, "Used memory: %d(%d MB)\n", vm.Used, vm.Used>>20)
-	fmt.Fprintf(w, "Free memory: %d(%d MB)\n", vm.Free, vm.Free>>20)
+	fmt.Fprintf(w, "Memory Stats\n")
+	fmt.Fprintf(tw, "Type\tBytes\tMB\n")
+	fmt.Fprintf(tw, "Used:\t%d\t%d\n", vm.Used, vm.Used>>20)
+	fmt.Fprintf(tw, "Free:\t%d\t%d\n", vm.Free, vm.Free>>20)
+	fmt.Fprintf(tw, "Available:\t%d\t%d\n", vm.Available, vm.Available>>20)
+	tw.Flush()
+	fmt.Fprintln(w)
 	t := srv.pool.NextCollection()
 	fmt.Fprintf(w, "Next container reclamation: %s (%s)\n", t, t.Sub(time.Now()))
 	// XXX: these are copies, they are local and we don't need to hold locks when
@@ -879,7 +940,6 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	sort.Slice(keys, func(i, j int) bool {
 		return keys[i] < keys[j]
 	})
-	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	for _, k := range keys {
 		fmt.Fprintf(tw, "%s\t%d\n", k, m[k])
 	}
@@ -892,10 +952,10 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		return a.Before(b)
 	})
 	fmt.Fprintf(w, "all notebooks:\n")
-	fmt.Fprintf(tw, "hash prefix\tdocker id\timage name\tlast accessed\texpires in\n")
+	fmt.Fprintf(tw, "key prefix\tdocker id\timage name\tlast accessed\texpires in\n")
 	for i := 0; i < len(nbs); i++ {
 		e := time.Until(nbs[i].lastAccessed.Add(srv.pool.containerLifetime))
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", nbs[i].hash[:8], nbs[i].id[:8], nbs[i].imageName, nbs[i].lastAccessed, e)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", nbs[i].key[:8], nbs[i].id[:8], nbs[i].imageName, nbs[i].lastAccessed, e)
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
