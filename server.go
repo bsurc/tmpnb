@@ -150,6 +150,7 @@ type notebookServer struct {
 	DisableJupyterAuth bool   `json:"disable_jupyter_auth"`
 	EnableCSP          bool   `json:"enable_csp"`
 	EnableDockerPush   bool   `json:"enable_docker_push"`
+	GithubRepo         string `json:"github_repo"`
 	EnablePProf        bool   `json:"enable_pprof"`
 	ImageRegexp        string `json:"image_regexp"`
 	MaxContainers      int    `json:"max_containers"`
@@ -855,6 +856,12 @@ func (srv *notebookServer) privacyHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Request) {
+	if srv.GithubRepo == "" {
+		// If the updating from Github is disabled, just tell Github to go away
+		// nicely.
+		w.WriteHeader(http.StatusOK)
+	}
+
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -880,9 +887,8 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 	}
 	// TODO(kyle): check signature/secret/HMAC
 
-	// If any of the docker/$PI_NAME/Dockerfile has changes, do a git pull,
-	// docker build, and push it to docker hub.  Then the others can pull the
-	// image straight from docker hub with the docker push hook.
+	// If any of the docker/$PI_NAME/Dockerfile has changes, download the file
+	// from master, run docker build.
 	var build []string
 	var remove []string
 	for _, commit := range push.Commits {
@@ -903,6 +909,8 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// TODO(kyle): should we remove the dropped files?  This would 'mirror' the
+	// repo more consistently.
 	for _, r := range remove {
 		_ = r
 		/*
@@ -915,8 +923,14 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 		*/
 	}
 
+	// Write OK early, let us do work in the background.  Github doesn't need to
+	// know any errors we encounter when building the images.
 	w.WriteHeader(http.StatusOK)
+
 	for _, d := range build {
+		// TODO(kyle): look at granularity here.  Probably move the goroutine up
+		// and let it chug one at a time.  If there was a blanket update of all
+		// containers or a lot added at once, it would be bad.
 		go func() {
 			dockerfile := d
 			u := url.URL{
