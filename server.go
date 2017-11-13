@@ -6,6 +6,7 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -149,6 +150,7 @@ type notebookServer struct {
 	Logfile            string `json:"logfile"`
 	Persistant         bool   `json:"persistent"`
 	Port               string `json:"port"`
+	RotateLogs         bool   `json:"rotate_logs"`
 	Host               string `json:"host"`
 	HTTPRedirect       bool   `json:"http_redirect"`
 	EnableACME         bool   `json:"enable_acme"`
@@ -196,6 +198,53 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		}
 		log.SetOutput(srv.logWriter)
 	}
+	// Set up some basic log rotation
+	if (srv.AccessLogfile != "" || srv.Logfile != "") && srv.RotateLogs {
+		t := time.NewTicker(time.Hour * 24 * 14)
+		go func() {
+			for {
+				select {
+				case <-t.C:
+					for _, fname := range []string{srv.AccessLogfile, srv.Logfile} {
+						if fname == "" {
+							continue
+						}
+						fout, err := os.Create(fname + "." + time.Now().Format("20060102150405") + ".gz")
+						if err != nil {
+							log.Print(err)
+							continue
+						}
+						w := gzip.NewWriter(fout)
+						fin, err := os.Open(fname)
+						if err != nil {
+							log.Print(err)
+							fout.Close()
+							continue
+						}
+						_, err = io.Copy(w, fin)
+						w.Flush()
+						w.Close()
+						fout.Close()
+						fin.Close()
+						os.Truncate(fname, 0)
+						logs, err := filepath.Glob(fname + "*" + ".gz")
+						if err != nil {
+							log.Print(err)
+							continue
+						}
+						sort.Strings(logs)
+						for len(logs) > 5 {
+							err = os.Remove(logs[0])
+							logs = logs[1:]
+						}
+					}
+				default:
+					time.Sleep(time.Hour * 24)
+				}
+			}
+		}()
+	}
+
 	// Disallow http -> https redirect if not using standard ports
 	if srv.HTTPRedirect && srv.Port != "" {
 		return nil, fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port)
@@ -279,16 +328,16 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			}
 		}
 	}
-	log.Println("OAuth2 whitelist:")
+	log.Print("OAuth2 whitelist:")
 	srv.oauthWhiteList = map[string]struct{}{}
 	for _, s := range srv.OAuthConfig.WhiteList {
 		srv.oauthWhiteList[s] = struct{}{}
-		log.Println(s)
+		log.Print(s)
 	}
 
 	srv.redirectMap = map[string]string{}
 
-	log.Println("OAuth2 regexp:", srv.OAuthConfig.RegExp)
+	log.Print("OAuth2 regexp:", srv.OAuthConfig.RegExp)
 
 	// Docker push support
 	srv.enableDockerPush = srv.EnableDockerPush
@@ -337,13 +386,13 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	signal.Notify(quit, os.Interrupt)
 	go func() {
 		<-quit
-		log.Println("Shutting down server...")
+		log.Print("Shutting down server...")
 		err := srv.pool.releaseContainers(true, false)
 		if err != nil {
 			log.Print(err)
 		}
 		if c, ok := srv.logWriter.(io.Closer); ok {
-			log.Println("closing log file")
+			log.Print("closing log file")
 			err = c.Close()
 			// If we hit an error, dump it to stdout.
 			log.SetOutput(os.Stdout)
@@ -352,7 +401,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			}
 		}
 		if c, ok := srv.accessLogWriter.(io.Closer); ok {
-			log.Println("closing log file")
+			log.Print("closing log file")
 			err = c.Close()
 			// If we hit an error, dump it to stdout.
 			if err != nil {
@@ -381,6 +430,9 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 		// Set the CSP headers if enabled
 		if srv.EnableCSP {
 			w.Header().Set(cspKey, csp())
+		}
+		if srv.HTTPRedirect {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 		if srv.enableOAuth {
 			c, err := r.Cookie(sessionKey)
@@ -620,7 +672,7 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		status = resp.StatusCode
 		switch status {
 		case http.StatusOK, http.StatusFound:
-			log.Println("container pinged successfully")
+			log.Print("container pinged successfully")
 			status = http.StatusOK
 			goto found
 		}
@@ -866,7 +918,10 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// statsHandler reports statistics for the server.  It apparently leaks file
+// descriptors.  return immediately for now, until we can fix.
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
+	return
 	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "Go version: %s\n", runtime.Version())
 	vm, _ := mem.VirtualMemory()
