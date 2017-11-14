@@ -593,6 +593,7 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	defer cli.Close()
 	filter := filters.NewArgs()
 	if id != "" {
 		filter.Add("id", id)
@@ -872,6 +873,7 @@ func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Requ
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		defer cli.Close()
 		log.Printf("attempting to pull %s", repo)
 		out, err := cli.ImagePull(ctx, repo, types.ImagePullOptions{})
 		if err != nil {
@@ -911,7 +913,6 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 // statsHandler reports statistics for the server.  It apparently leaks file
 // descriptors.  return immediately for now, until we can fix.
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
-	return
 	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "Go version: %s\n", runtime.Version())
 	vm, _ := mem.VirtualMemory()
@@ -974,6 +975,30 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, string(x))
 	}
+	fs, err := lsof()
+	if err != nil {
+		return
+	}
+	fsm := map[string]int{}
+	for _, f := range fs {
+		fsm[fmt.Sprintf("%s (%d)", f.name, f.pid)]++
+	}
+	type ord struct {
+		name string
+		n    int
+	}
+	var ords []ord
+	for k, v := range fsm {
+		ords = append(ords, ord{k, v})
+	}
+	sort.Slice(ords, func(i, j int) bool {
+		return ords[i].n > ords[j].n
+	})
+	fmt.Fprintf(tw, "process\topen files\n")
+	for _, o := range ords {
+		fmt.Fprintf(tw, "%s\t%d\n", o.name, o.n)
+	}
+	tw.Flush()
 }
 
 // Start starts the http/s listener.
