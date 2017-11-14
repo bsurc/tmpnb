@@ -145,6 +145,7 @@ type notebookServer struct {
 	EnableCSP          bool   `json:"enable_csp"`
 	EnableDockerPush   bool   `json:"enable_docker_push"`
 	EnablePProf        bool   `json:"enable_pprof"`
+	EnableStats        bool   `json:"enable_stats"`
 	ImageRegexp        string `json:"image_regexp"`
 	MaxContainers      int    `json:"max_containers"`
 	Logfile            string `json:"logfile"`
@@ -913,6 +914,10 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 // statsHandler reports statistics for the server.  It apparently leaks file
 // descriptors.  return immediately for now, until we can fix.
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
+	if !srv.EnableStats {
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		return
+	}
 	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "Go version: %s\n", runtime.Version())
 	vm, _ := mem.VirtualMemory()
