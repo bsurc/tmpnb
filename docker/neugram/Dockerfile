@@ -10,23 +10,23 @@ USER root
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl && \
-    tar -C /usr/local/ -xvf go.tar.gz && \
-    rm go.tar.gz
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-ENV PATH=$PATH:/usr/local/go/bin
+RUN curl -o go.tar.gz "https://storage.googleapis.com/golang/go1.9.2.linux-amd64.tar.gz" 
+RUN tar -C /usr/local -xzf go.tar.gz
+RUN rm go.tar.gz
 
 USER $NB_USER
-
-ENV GOPATH=$HOME/.go
-
-ENV PATH=$PATH:$GOPATH/bin
-
-RUN go get neugram.io/ng
-
-RUN mkdir -p $HOME/.local/share/jupyter/kernels/neugram/ &&  \
-    echo '{ \
-        "argv": [ "ng", "-jupyter", "{connection_file}" ], \
-        "display_name": "Neugram", \
-        "language": "neugram" }' > $HOME/.local/share/jupyter/kernels/neugram/kernel.json
-
 WORKDIR $HOME
+
+ENV GOPATH="$HOME/.go"
+ENV PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
+
+RUN /usr/local/go/bin/go get neugram.io/ng
+
+RUN mkdir -p $HOME/.local/share/jupyter/kernels/neugram/
+
+RUN echo \
+'{"argv": [ "ng", "-jupyter", "{connection_file}" ], "display_name": "Neugram", "language": "neugram" }' > $HOME/.local/share/jupyter/kernels/neugram/kernel.json
+
