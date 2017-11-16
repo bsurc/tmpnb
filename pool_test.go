@@ -41,7 +41,10 @@ func TestImageMatch(t *testing.T) {
 	}
 }
 
-const skipDocker = "skipping docker dependent test"
+const (
+	skipDocker   = "skipping docker dependent test"
+	testNotebook = "jupyter/minimal-notebook"
+)
 
 func TestNewNotebook(t *testing.T) {
 	if testing.Short() {
@@ -53,7 +56,7 @@ func TestNewNotebook(t *testing.T) {
 	}
 	p.disableJupyterAuth = true
 	p.stopCollector()
-	nb, err := p.newNotebook("jupyter/minimal-notebook", false, "")
+	nb, err := p.newNotebook(testNotebook, false, "")
 	if err != nil {
 		t.Error(err)
 	}
@@ -81,7 +84,7 @@ func TestCollection(t *testing.T) {
 	// Stop the collector, then restart it with an aggressive rate
 	p.stopCollector()
 	p.startCollector(time.Second)
-	nb, err := p.newNotebook("jupyter/minimal-notebook", false, "")
+	nb, err := p.newNotebook(testNotebook, false, "")
 	if err != nil {
 		t.Error(err)
 	}
@@ -108,7 +111,7 @@ func TestZombies(t *testing.T) {
 	}
 	p.disableJupyterAuth = true
 	p.stopCollector()
-	nb, err := p.newNotebook("jupyter/minimal-notebook", false, "")
+	nb, err := p.newNotebook(testNotebook, false, "")
 	if err != nil {
 		t.Error(err)
 	}
