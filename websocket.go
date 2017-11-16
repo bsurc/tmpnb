@@ -47,6 +47,7 @@ func websocketProxy(target string) http.Handler {
 			log.Printf("Error dialing websocket backend %s: %v", target, err)
 			return
 		}
+		defer d.Close()
 		hj, ok := w.(http.Hijacker)
 		if !ok {
 			http.Error(w, "Not a hijacker?", 500)
@@ -58,7 +59,6 @@ func websocketProxy(target string) http.Handler {
 			return
 		}
 		defer nc.Close()
-		defer d.Close()
 
 		err = r.Write(d)
 		if err != nil {
@@ -73,6 +73,8 @@ func websocketProxy(target string) http.Handler {
 		}
 		go cp(d, nc)
 		go cp(nc, d)
-		<-errc
+		if err = <-errc; err != nil {
+			log.Print(err)
+		}
 	})
 }

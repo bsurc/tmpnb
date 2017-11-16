@@ -6,6 +6,7 @@
   "enable_csp": false,
   "enable_docker_push": false,
   "enable_pprof": true,
+  "enable_stats": true,
   "image_regexp": ".*",
   "access_logfile": "access.log",
   "logfile": "tmpnb.log",

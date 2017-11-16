@@ -153,6 +153,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 	if err != nil {
 		return nil, err
 	}
+	defer cli.Close()
 	images, err := cli.ImageList(context.Background(), types.ImageListOptions{})
 	if err != nil {
 		return nil, err
@@ -206,6 +207,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 		log.Print(err)
 		return nil, err
 	}
+	defer cli.Close()
 
 	tag := "latest"
 	utag := strings.Split(email, "@")[0]
@@ -347,6 +349,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 		p.portSet.Drop(port)
 		return nil, err
 	}
+	// TODO(kyle): call cli.ContainerWait() to let it start up...
 	return t, nil
 }
 
@@ -430,6 +433,7 @@ func (p *notebookPool) stopAndKillContainer(id string) {
 	if err != nil {
 		log.Print(err)
 	}
+	defer cli.Close()
 	ctx := context.Background()
 	if err := cli.ContainerStop(ctx, id, &d); err != nil {
 		log.Print(err)
@@ -472,6 +476,10 @@ func (p *notebookPool) zombieContainers() ([]types.Container, error) {
 	}
 	p.Unlock()
 	cli, err := client.NewEnvClient()
+	if err != nil {
+		return nil, err
+	}
+	defer cli.Close()
 	opts := types.ContainerListOptions{}
 	containers, err := cli.ContainerList(context.Background(), opts)
 	if err != nil {
