@@ -46,7 +46,7 @@ const (
 	cspKey = "Content-Security-Policy"
 
 	// expCSP is what we should get based on the key value pairs above
-	expCSP = "default-src 'self'; report-uri /csp_report; "
+	expCSP = "default-src 'self'; frame-ancestors 'none'; report-uri /csp_report; "
 )
 
 func init() {

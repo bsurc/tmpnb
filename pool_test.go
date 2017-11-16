@@ -46,7 +46,7 @@ func TestNotebookQueue(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		nb := tempNotebook{
 			id:           fmt.Sprintf("%d", i),
-			hash:         fmt.Sprintf("hash_%d", i),
+			key:          fmt.Sprintf("key_%d", i),
 			imageName:    fmt.Sprintf("image_%d", i),
 			lastAccessed: time.Now(),
 			port:         8000 + i,
@@ -85,7 +85,10 @@ func TestNotebookQueue(t *testing.T) {
 	}
 }
 
-const skipDocker = "skipping docker dependent test"
+const (
+	skipDocker   = "skipping docker dependent test"
+	testNotebook = "jupyter/minimal-notebook"
+)
 
 func TestNewNotebook(t *testing.T) {
 	if testing.Short() {

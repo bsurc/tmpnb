@@ -176,6 +176,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 	if err != nil {
 		return nil, err
 	}
+	defer cli.Close()
 	images, err := cli.ImageList(context.Background(), types.ImageListOptions{})
 	if err != nil {
 		return nil, err
@@ -238,6 +239,7 @@ func (p *notebookPool) createAndStartContainer(image, email string, pull bool) (
 		log.Print(err)
 		return nil, err
 	}
+	defer cli.Close()
 	// TODO(kyle): possibly provide tag support
 	if pull {
 		log.Printf("pulling container %s", image)
@@ -361,6 +363,7 @@ func (p *notebookPool) newNotebook(image, email string, pull bool) (*tempNoteboo
 	}
 	t.userEmail = email
 	err = p.addNotebook(t)
+	// TODO(kyle): call cli.ContainerWait() to let it start up...
 	return t, err
 }
 
@@ -391,6 +394,7 @@ func (p *notebookPool) stopAndKillContainer(id string) {
 	if err != nil {
 		log.Print(err)
 	}
+	defer cli.Close()
 	ctx := context.Background()
 	if err := cli.ContainerStop(ctx, id, &d); err != nil {
 		log.Print(err)
@@ -429,7 +433,7 @@ func (p *notebookPool) queuedNotebooks() []tempNotebook {
 		for _, nb := range v.q {
 			nbs = append(nbs, tempNotebook{
 				id:           nb.id,
-				hash:         nb.hash,
+				key:          nb.key,
 				imageName:    nb.imageName,
 				lastAccessed: nb.lastAccessed,
 				port:         nb.port,
@@ -462,6 +466,10 @@ func (p *notebookPool) zombieContainers() ([]types.Container, error) {
 	}
 	p.reserveMu.Unlock()
 	cli, err := client.NewEnvClient()
+	if err != nil {
+		return nil, err
+	}
+	defer cli.Close()
 	opts := types.ContainerListOptions{}
 	containers, err := cli.ContainerList(context.Background(), opts)
 	if err != nil {
@@ -543,7 +551,7 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 			for c := v.Pop(); c != nil; c = v.Pop() {
 				trash = append(trash, tempNotebook{
 					id:           c.id,
-					hash:         c.hash,
+					key:          c.key,
 					imageName:    c.imageName,
 					lastAccessed: c.lastAccessed,
 					port:         c.port,

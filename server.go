@@ -91,7 +91,7 @@ func (s *session) set(key, val string) {
 // XXX: note that larger configurations in the docker images, many files can be
 // opened.  You may need to set a higher ulimit for files on the server.  On a
 // server with ~60 open notebooks, ~20K files were opened.  Setting the limit
-// on the order of 1<<16 should be enough, I hope.
+// on the order of 1<<18 should be enough, I hope.
 type notebookServer struct {
 	// pool manages the containers
 	pool *notebookPool
@@ -145,6 +145,7 @@ type notebookServer struct {
 	EnableCSP          bool   `json:"enable_csp"`
 	EnableDockerPush   bool   `json:"enable_docker_push"`
 	EnablePProf        bool   `json:"enable_pprof"`
+	EnableStats        bool   `json:"enable_stats"`
 	ImageRegexp        string `json:"image_regexp"`
 	MaxContainers      int    `json:"max_containers"`
 	Logfile            string `json:"logfile"`
@@ -593,6 +594,7 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	defer cli.Close()
 	filter := filters.NewArgs()
 	if id != "" {
 		filter.Add("id", id)
@@ -872,6 +874,7 @@ func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Requ
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		defer cli.Close()
 		log.Printf("attempting to pull %s", repo)
 		out, err := cli.ImagePull(ctx, repo, types.ImagePullOptions{})
 		if err != nil {
@@ -911,7 +914,10 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 // statsHandler reports statistics for the server.  It apparently leaks file
 // descriptors.  return immediately for now, until we can fix.
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
-	return
+	if !srv.EnableStats {
+		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		return
+	}
 	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "Go version: %s\n", runtime.Version())
 	vm, _ := mem.VirtualMemory()
@@ -987,6 +993,30 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, string(x))
 	}
+	fs, err := lsof()
+	if err != nil {
+		return
+	}
+	fsm := map[string]int{}
+	for _, f := range fs {
+		fsm[fmt.Sprintf("%s (%d)", f.name, f.pid)]++
+	}
+	type ord struct {
+		name string
+		n    int
+	}
+	var ords []ord
+	for k, v := range fsm {
+		ords = append(ords, ord{k, v})
+	}
+	sort.Slice(ords, func(i, j int) bool {
+		return ords[i].n > ords[j].n
+	})
+	fmt.Fprintf(tw, "process\topen files\n")
+	for _, o := range ords {
+		fmt.Fprintf(tw, "%s\t%d\n", o.name, o.n)
+	}
+	tw.Flush()
 }
 
 // Start starts the http/s listener.
