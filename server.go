@@ -123,6 +123,8 @@ type notebookServer struct {
 	buildMu sync.Mutex
 	// buildMap holds names of images currently being built
 	buildMap map[string]struct{}
+	// githubToken holds the github secret for the push event
+	githubToken string
 	// redirectLock locks the redirectMap
 	redirectMu sync.Mutex
 	// redirectMap handles initial incoming requests before the user is
