@@ -150,20 +150,21 @@ type notebookServer struct {
 	DisableJupyterAuth bool   `json:"disable_jupyter_auth"`
 	EnableCSP          bool   `json:"enable_csp"`
 	EnableDockerPush   bool   `json:"enable_docker_push"`
-	GithubRepo         string `json:"github_repo"`
-	EnablePProf        bool   `json:"enable_pprof"`
-	EnableStats        bool   `json:"enable_stats"`
-	ImageRegexp        string `json:"image_regexp"`
-	MaxContainers      int    `json:"max_containers"`
-	Logfile            string `json:"logfile"`
-	Port               string `json:"port"`
-	RotateLogs         bool   `json:"rotate_logs"`
-	Host               string `json:"host"`
-	HTTPRedirect       bool   `json:"http_redirect"`
-	EnableACME         bool   `json:"enable_acme"`
-	TLSCert            string `json:"tls_cert"`
-	TLSKey             string `json:"tls_key"`
-	OAuthConfig        struct {
+	// Github repository name (bsurc/tmpnb)
+	GithubRepo    string `json:"github_repo"`
+	EnablePProf   bool   `json:"enable_pprof"`
+	EnableStats   bool   `json:"enable_stats"`
+	ImageRegexp   string `json:"image_regexp"`
+	MaxContainers int    `json:"max_containers"`
+	Logfile       string `json:"logfile"`
+	Port          string `json:"port"`
+	RotateLogs    bool   `json:"rotate_logs"`
+	Host          string `json:"host"`
+	HTTPRedirect  bool   `json:"http_redirect"`
+	EnableACME    bool   `json:"enable_acme"`
+	TLSCert       string `json:"tls_cert"`
+	TLSKey        string `json:"tls_key"`
+	OAuthConfig   struct {
 		WhiteList []string `json:"whitelist"`
 		RegExp    string   `json:"match"`
 	} `json:"oauth_confg"`
@@ -885,6 +886,10 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.Print(err)
+		return
+	}
+	if push.Repository.FullName != srv.GithubRepo {
+		w.WriteHeader(http.StatusPreconditionFailed)
 		return
 	}
 	// TODO(kyle): check signature/secret/HMAC
