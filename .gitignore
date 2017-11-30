@@ -13,14 +13,9 @@
 # Project-local glide cache, RE: https://github.com/Masterminds/glide/issues/736
 .glide/
 
-<<<<<<< HEAD
-*.swo
-*.swp
-=======
 # vim
 *.swo
 *.swp
 
 # executable
 tmpnb
->>>>>>> master
