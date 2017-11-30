@@ -940,8 +940,8 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 		// TODO(kyle): look at granularity here.  Probably move the goroutine up
 		// and let it chug one at a time.  If there was a blanket update of all
 		// containers or a lot added at once, it would be bad.
+		dockerfile := d
 		go func() {
-			dockerfile := d
 			u := url.URL{
 				Scheme: "https",
 				Host:   "github.com",
@@ -960,7 +960,7 @@ func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Requ
 				log.Print(err)
 				return
 			}
-			buf := new(bytes.Buffer)
+			buf := &bytes.Buffer{}
 			tw := tar.NewWriter(buf)
 			h := &tar.Header{
 				Name:     "Dockerfile",
