@@ -254,7 +254,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, lifetime, true)
+	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, lifetime, srv.Persistant)
 	if err != nil {
 		return nil, err
 	}
