@@ -562,7 +562,6 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 			port:         trash[i].port,
 			email:        trash[i].email,
 		}
-		log.Println(c.email)
 		f := func(c nbCopy) {
 			// Get the key out of the map as soon as possible, then it's unreachable
 			// by the server and we don't have to worry about messy access
