@@ -50,7 +50,7 @@ func TestNewNotebook(t *testing.T) {
 	if testing.Short() {
 		t.Skip(skipDocker)
 	}
-	p, err := newNotebookPool(".*", 2, time.Minute*2)
+	p, err := newNotebookPool(".*", 2, time.Minute*2, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestCollection(t *testing.T) {
 	if testing.Short() {
 		t.Skip(skipDocker)
 	}
-	p, err := newNotebookPool(".*", 2, time.Second*5)
+	p, err := newNotebookPool(".*", 2, time.Second*5, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,11 +88,11 @@ func TestCollection(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	time.Sleep(time.Second * 6)
+	time.Sleep(time.Second * 10)
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/?token=", nb.port))
+	defer resp.Body.Close()
 	if err == nil {
-		resp.Body.Close()
-		t.Error("container should be dead")
+		t.Errorf("container should be dead")
 	}
 	n := len(p.activeNotebooks())
 	if n != 0 {
@@ -105,7 +105,7 @@ func TestZombies(t *testing.T) {
 	if testing.Short() {
 		t.Skip(skipDocker)
 	}
-	p, err := newNotebookPool(".*", 2, time.Minute*2)
+	p, err := newNotebookPool(".*", 2, time.Minute*2, false)
 	if err != nil {
 		t.Fatal(err)
 	}

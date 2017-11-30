@@ -17,6 +17,11 @@ RUN apt-get update && \
 
 USER $NB_USER
 
+RUN conda install --quiet --yes --channel glotzer \
+    'matplotlib=2.0*' && \
+    conda remove --quiet --yes --force qt pyqt && \
+    conda clean -tipsy
+
 WORKDIR $HOME
 
 RUN wget "http://swcarpentry.github.io/shell-novice/data/shell-novice-data.zip"

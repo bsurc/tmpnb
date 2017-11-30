@@ -159,6 +159,7 @@ type notebookServer struct {
 	ImageRegexp   string `json:"image_regexp"`
 	MaxContainers int    `json:"max_containers"`
 	Logfile       string `json:"logfile"`
+	Persistant    bool   `json:"persistent"`
 	Port          string `json:"port"`
 	RotateLogs    bool   `json:"rotate_logs"`
 	Host          string `json:"host"`
@@ -263,7 +264,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, lifetime)
+	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, lifetime, srv.Persistant)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +280,9 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	}
 	srv.pool.disableJupyterAuth = srv.DisableJupyterAuth
 	srv.enableOAuth = srv.OAuthConfig.RegExp != "" || len(srv.OAuthConfig.WhiteList) > 0
+	if !srv.enableOAuth && srv.Persistant {
+		return nil, fmt.Errorf("OAuth must be enabled in persistent mode")
+	}
 	if srv.enableOAuth {
 		// OAuth
 		srv.sessions = map[string]*session{}
@@ -647,22 +651,22 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// ping && running
-	var tmpnb *tempNotebook
+	var nb *notebook
 	for _, v := range srv.pool.containerMap {
 		if v.id == id {
-			tmpnb = v
+			nb = v
 			break
 		}
 	}
-	if tmpnb == nil {
+	if nb == nil {
 		log.Printf("couldn't find container in containerMap: %s", id)
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	pingURL := url.URL{
 		Scheme: "http",
-		Host:   strings.Split(r.Host, ":")[0] + fmt.Sprintf(":%d", tmpnb.port),
-		Path:   path.Join("/book", tmpnb.key) + "/",
+		Host:   strings.Split(r.Host, ":")[0] + fmt.Sprintf(":%d", nb.port),
+		Path:   nb.path(),
 	}
 	log.Printf("ping target: %s", pingURL.String())
 	var resp *http.Response
@@ -723,13 +727,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		imageName = defaultNotebook
 	}
 
-	// Make old links backwards compatible.  Add a tag if it doesn't have one.
-	// Use 'latest' as the default.
-	if !strings.Contains(imageName, ":") {
-		imageName += ":latest"
-	}
-
-	if _, ok := srv.pool.availableImages[imageName]; !ok {
+	if _, ok := srv.pool.baseImages[imageName]; !ok {
 		http.Error(w, fmt.Sprintf("invalid image name: %s", imageName), http.StatusBadRequest)
 		log.Printf("invalid image name: %s", imageName)
 		return
@@ -744,17 +742,26 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		http.Error(w, "image is currently being re-built", http.StatusServiceUnavailable)
 		return
 	}
-
-	tmpnb, err := srv.pool.newNotebook(imageName, pull, email)
+	nb, err := srv.pool.newNotebook(imageName, pull, email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		log.Print(err)
 		return
 	}
 
+	if srv.Persistant {
+		// If we have a valid notebook, it may already be running in persistent
+		// mode.  Check the mux and see if the path is already registered.  If it
+		// is, just point it to the existing notebook.
+		if srv.mux.Registered(nb.path()) {
+			http.Redirect(w, r, nb.path(), http.StatusTemporaryRedirect)
+			return
+		}
+	}
+
 	proxyURL := url.URL{
 		Scheme: "http",
-		Host:   fmt.Sprintf("localhost:%d", tmpnb.port),
+		Host:   fmt.Sprintf("localhost:%d", nb.port),
 	}
 	log.Printf("reverse proxy URL: %s", proxyURL.String())
 
@@ -771,11 +778,11 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			IdleConnTimeout: 30 * time.Second,
 		}
 	*/
-	handlerPath := path.Join("/book", tmpnb.key) + "/"
+	handlerPath := nb.path()
 	log.Printf("handler: %s", handlerPath)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		// Read the cookie for session information and compare the
-		// email to the email provided by the tmpnb. If they match,
+		// email to the email provided by the nb. If they match,
 		// allow access, else redirect them to /list
 		if srv.enableOAuth {
 			email := ""
@@ -791,19 +798,19 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			if s != nil {
 				email = s.get("email")
 			}
-			if email != tmpnb.userEmail {
+			if email != nb.email {
 				http.Redirect(w, r, "/list", http.StatusUnauthorized)
 				return
 			}
 		}
 
-		tmpnb.Lock()
-		tmpnb.lastAccessed = time.Now()
-		tmpnb.Unlock()
+		nb.Lock()
+		nb.lastAccessed = time.Now()
+		nb.Unlock()
 		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		if isWebsocket(r) {
 			log.Print("proxying to websocket handler")
-			f := websocketProxy(fmt.Sprintf(":%d", tmpnb.port))
+			f := websocketProxy(fmt.Sprintf(":%d", nb.port))
 			f.ServeHTTP(w, r)
 			return
 		}
@@ -826,7 +833,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		Path  string
 		Token string
 	}{
-		ID:    tmpnb.id,
+		ID:    nb.id,
 		Path:  handlerURL.Path,
 		Token: srv.token,
 	})
@@ -1071,9 +1078,11 @@ func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Requ
 // listImagesHandler lists html links to the different docker images.
 func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Request) {
 	images := []string{}
-	for k := range srv.pool.availableImages {
+	srv.pool.Lock()
+	for k := range srv.pool.baseImages {
 		images = append(images, k)
 	}
+	srv.pool.Unlock()
 	sort.Slice(images, func(i, j int) bool {
 		return images[i] < images[j]
 	})
@@ -1103,6 +1112,7 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprintln(w)
 	t := srv.pool.NextCollection()
 	fmt.Fprintf(w, "Next container reclamation: %s (%s)\n", t, t.Sub(time.Now()))
+	fmt.Fprintf(w, "Persistent mode: %t\n", srv.Persistant)
 	// XXX: these are copies, they are local and we don't need to hold locks when
 	// accessing them.
 	nbs := srv.pool.activeNotebooks()

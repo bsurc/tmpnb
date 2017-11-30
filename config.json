@@ -9,11 +9,12 @@
   "enable_stats": true,
   "github_repo": "bsurc/tmpnb",
   "image_regexp": ".*",
-  "access_logfile": "access.log",
-  "logfile": "tmpnb.log",
+  "access_logfile": "",
+  "logfile": "",
   "max_containers": 100,
   "rotate_logs": true,
   "http_redirect": false,
+  "persistent": false,
   "port": ":8888",
   "host": "127.0.0.1",
   "tls_cert": "",
@@ -21,6 +22,6 @@
   "oauth_confg": {
     "whitelist": [
     ],
-    "match": ""
+    "match": "bsu"
   }
 }
