@@ -8,20 +8,19 @@
   "enable_pprof": true,
   "enable_stats": true,
   "image_regexp": ".*",
-  "access_logfile": "access.log",
-  "logfile": "tmpnb.log",
+  "access_logfile": "",
+  "logfile": "",
   "max_containers": 100,
   "rotate_logs": true,
   "http_redirect": false,
-  "persistent": true,
+  "persistent": false,
   "port": ":8888",
   "host": "127.0.0.1",
   "tls_cert": "",
   "tls_key": "",
   "oauth_confg": {
     "whitelist": [
-      "kyleshannon@boisestate.edu"
     ],
-    "match": ""
+    "match": "bsu"
   }
 }
