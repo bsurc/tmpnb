@@ -941,6 +941,7 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	t := srv.pool.NextCollection()
 	fmt.Fprintf(w, "Next container reclamation: %s (%s)\n", t, t.Sub(time.Now()))
 	fmt.Fprintf(w, "Persistent mode: %t\n", srv.Persistant)
+	fmt.Fprintf(w, "Container lifetime: %s\n", srv.pool.containerLifetime)
 	// XXX: these are copies, they are local and we don't need to hold locks when
 	// accessing them.
 	nbs := srv.pool.activeNotebooks()
@@ -991,28 +992,31 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, string(x))
 	}
-	fs, err := lsof()
-	if err != nil {
-		return
-	}
-	fsm := map[string]int{}
-	for _, f := range fs {
-		fsm[fmt.Sprintf("%s (%d)", f.name, f.pid)]++
-	}
-	type ord struct {
-		name string
-		n    int
-	}
-	var ords []ord
-	for k, v := range fsm {
-		ords = append(ords, ord{k, v})
-	}
-	sort.Slice(ords, func(i, j int) bool {
-		return ords[i].n > ords[j].n
-	})
-	fmt.Fprintf(tw, "process\topen files\n")
-	for _, o := range ords {
-		fmt.Fprintf(tw, "%s\t%d\n", o.name, o.n)
+	const showFiles = false
+	if showFiles {
+		fs, err := lsof()
+		if err != nil {
+			return
+		}
+		fsm := map[string]int{}
+		for _, f := range fs {
+			fsm[fmt.Sprintf("%s (%d)", f.name, f.pid)]++
+		}
+		type ord struct {
+			name string
+			n    int
+		}
+		var ords []ord
+		for k, v := range fsm {
+			ords = append(ords, ord{k, v})
+		}
+		sort.Slice(ords, func(i, j int) bool {
+			return ords[i].n > ords[j].n
+		})
+		fmt.Fprintf(tw, "process\topen files\n")
+		for _, o := range ords {
+			fmt.Fprintf(tw, "%s\t%d\n", o.name, o.n)
+		}
 	}
 	tw.Flush()
 }
