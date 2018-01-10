@@ -4,7 +4,6 @@ MAINTAINER Kyle Shannon <kyle@pobox.com>
 
 USER root
 
-RUN apt-get remove -f -q docker docker-engine docker.io
 RUN apt-get install -y \
     apt-transport-https \
     ca-certificates \
