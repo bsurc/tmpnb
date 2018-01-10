@@ -91,7 +91,7 @@ func TestCollection(t *testing.T) {
 	time.Sleep(time.Second * 10)
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/?token=", nb.port))
 	defer resp.Body.Close()
-	if err == nil {
+	if err == nil && resp.StatusCode == 200 {
 		t.Errorf("container should be dead")
 	}
 	n := len(p.activeNotebooks())
