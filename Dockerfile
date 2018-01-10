@@ -4,8 +4,8 @@ MAINTAINER Kyle Shannon <kyle@pobox.com>
 
 USER root
 
-RUN apt-get remove docker docker-engine docker.io
-RUN apt-get install \
+RUN apt-get remove -f -q docker docker-engine docker.io
+RUN apt-get install -y \
     apt-transport-https \
     ca-certificates \
     curl \
@@ -18,7 +18,7 @@ RUN add-apt-repository \
     $(lsb_release -cs) \
     stable"
 RUN apt-get update
-RUN apt-get install docker-ce
+RUN apt-get install -y docker-ce
 
 RUN curl -o go.tar.gz https://storage.googleapis.com/golang/go1.10beta1.linux-amd64.tar.gz
 RUN tar -xzf -C /usr/local go.tar.gz
