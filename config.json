@@ -1,6 +1,6 @@
 {
-  "asset_path": "./assets",
-  "container_lifetime": "1m",
+  "asset_path": "/opt/src/github.com/bsurc/tmpnb/assets",
+  "container_lifetime": "10m",
   "disable_jupyter_auth": false,
   "enable_acme": false,
   "enable_csp": false,
@@ -11,7 +11,7 @@
   "access_logfile": "",
   "logfile": "",
   "max_containers": 100,
-  "rotate_logs": true,
+  "rotate_logs": false,
   "http_redirect": false,
   "persistent": false,
   "port": ":8888",
@@ -21,6 +21,6 @@
   "oauth_confg": {
     "whitelist": [
     ],
-    "match": "bsu"
+    "match": ""
   }
 }

@@ -1,0 +1,12 @@
+[Unit]
+Description=Temporary Jupyter Notebook Server
+After=docker.service
+
+[Service]
+User=root
+Group=root
+ExecStart=/opt/go/bin/tmpnb /opt/go/src/github.com/bsurc/tmpnb/jupyter.json
+LimitNOFILE=32768
+
+[Install]
+WantedBy=default.target
