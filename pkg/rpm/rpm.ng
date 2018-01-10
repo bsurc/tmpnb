@@ -1,0 +1,7 @@
+#!/usr/bin/env ng
+
+$$
+mkdir rpmbuild/{BUILD,SRPMS,SPECS,SOURCES,RPMS}
+rpmbuild --buildroot $PWD/rpmbuild -bb tmpnb.spec
+$$
+
