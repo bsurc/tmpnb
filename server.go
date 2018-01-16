@@ -1210,9 +1210,6 @@ func (srv *notebookServer) Start() {
 					http.Redirect(w, r, u.String(), http.StatusPermanentRedirect)
 				}),
 			}
-			go func() {
-				log.Fatal(httpServer.ListenAndServe())
-			}()
 		}
 		if hardenTLS {
 			// Straight outta https://blog.cloudflare.com/exposing-go-on-the-internet/
@@ -1245,12 +1242,25 @@ func (srv *notebookServer) Start() {
 		}
 		if srv.EnableACME {
 			log.Print("using acme via letsencrypt")
-			log.Fatal(srv.Serve(autocert.NewListener(srv.Host)))
+			m := &autocert.Manager{
+				Cache:      autocert.DirCache("/opt/acme/"),
+				Prompt:     autocert.AcceptTOS,
+				HostPolicy: autocert.HostWhitelist(srv.Host),
+			}
+			go func() {
+				log.Fatal(http.ListenAndServe(":http", m.HTTPHandler(nil)))
+			}()
+			srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate}
+			log.Fatal(srv.ListenAndServeTLS("", ""))
+
 		} else {
 			log.Print("using standard tls")
 			log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
 		}
 	} else {
+		go func() {
+			log.Fatal(httpServer.ListenAndServe())
+		}()
 		log.Fatal(srv.ListenAndServe())
 	}
 }
