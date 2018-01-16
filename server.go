@@ -1164,32 +1164,6 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, string(x))
 	}
-	const showFiles = false
-	if showFiles {
-		fs, err := lsof()
-		if err != nil {
-			return
-		}
-		fsm := map[string]int{}
-		for _, f := range fs {
-			fsm[fmt.Sprintf("%s (%d)", f.name, f.pid)]++
-		}
-		type ord struct {
-			name string
-			n    int
-		}
-		var ords []ord
-		for k, v := range fsm {
-			ords = append(ords, ord{k, v})
-		}
-		sort.Slice(ords, func(i, j int) bool {
-			return ords[i].n > ords[j].n
-		})
-		fmt.Fprintf(tw, "process\topen files\n")
-		for _, o := range ords {
-			fmt.Fprintf(tw, "%s\t%d\n", o.name, o.n)
-		}
-	}
 	tw.Flush()
 }
 
@@ -1197,19 +1171,6 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 func (srv *notebookServer) Start() {
 	if (srv.TLSCert != "" && srv.TLSKey != "") || srv.EnableACME {
 		if srv.HTTPRedirect {
-			httpServer := http.Server{
-				ReadTimeout:  5 * time.Second,
-				WriteTimeout: 5 * time.Second,
-				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					u := *r.URL
-					u.Scheme = "https"
-					u.Host = r.Host
-					r.ParseForm()
-					u.RawPath = r.Form.Encode()
-					w.Header().Set("Connection", "close")
-					http.Redirect(w, r, u.String(), http.StatusPermanentRedirect)
-				}),
-			}
 		}
 		if hardenTLS {
 			// Straight outta https://blog.cloudflare.com/exposing-go-on-the-internet/
@@ -1258,9 +1219,6 @@ func (srv *notebookServer) Start() {
 			log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
 		}
 	} else {
-		go func() {
-			log.Fatal(httpServer.ListenAndServe())
-		}()
 		log.Fatal(srv.ListenAndServe())
 	}
 }
