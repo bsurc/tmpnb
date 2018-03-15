@@ -24,3 +24,5 @@ RUN conda install --quiet --yes \
     conda clean -tipsy
 
 WORKDIR $HOME
+RUN cd $HOME
+RUN mkdir Desktop
