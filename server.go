@@ -147,57 +147,41 @@ type notebookServer struct {
 	logWriter io.Writer
 
 	//Configuration options for the server
-	AccessLogfile      string `json:"access_logfile"`
-	AssetPath          string `json:"asset_path"`
-	ContainerLifetime  string `json:"container_lifetime"`
-	DisableJupyterAuth bool   `json:"disable_jupyter_auth"`
-	EnableCSP          bool   `json:"enable_csp"`
-	EnableDockerPush   bool   `json:"enable_docker_push"`
+	AccessLogfile      string
+	AssetPath          string
+	ContainerLifetime  string
+	DisableJupyterAuth bool
+	EnableCSP          bool
+	EnableDockerPush   bool
 	// Github repository name (bsurc/tmpnb)
-	GithubRepo    string `json:"github_repo"`
-	EnablePProf   bool   `json:"enable_pprof"`
-	EnableStats   bool   `json:"enable_stats"`
-	ImageRegexp   string `json:"image_regexp"`
-	MaxContainers int    `json:"max_containers"`
-	Logfile       string `json:"logfile"`
-	Persistant    bool   `json:"persistent"`
-	Port          string `json:"port"`
-	RotateLogs    bool   `json:"rotate_logs"`
-	Host          string `json:"host"`
-	HTTPRedirect  bool   `json:"http_redirect"`
-	EnableACME    bool   `json:"enable_acme"`
-	TLSCert       string `json:"tls_cert"`
-	TLSKey        string `json:"tls_key"`
+	GithubRepo    string
+	EnablePProf   bool
+	EnableStats   bool
+	ImageRegexp   string
+	MaxContainers int
+	Logfile       string
+	Persistant    bool
+	Port          string
+	RotateLogs    bool
+	Host          string
+	HTTPRedirect  bool
+	EnableACME    bool
+	TLSCert       string
+	TLSKey        string
 	OAuthConfig   struct {
-		WhiteList []string `json:"whitelist"`
-		RegExp    string   `json:"match"`
-	} `json:"oauth_confg"`
+		WhiteList []string
+		RegExp    string
+	}
 }
 
-// newNotebookServer initializes a server and owned resources, using a
+// init initializes a server and owned resources, using a
 // configuration if supplied.
-func newNotebookServer(config string) (*notebookServer, error) {
-	srv := &notebookServer{
-		ContainerLifetime: "10m",
-		ImageRegexp:       allImageMatch,
-		MaxContainers:     defaultMaxContainers,
-	}
-	if config != "" {
-		fin, err := os.Open(config)
-		if err != nil {
-			return nil, err
-		}
-		err = json.NewDecoder(fin).Decode(srv)
-		fin.Close()
-		if err != nil {
-			return nil, err
-		}
-	}
+func (srv *notebookServer) init() error {
 	var err error
 	if srv.AccessLogfile != "" {
 		srv.accessLogWriter, err = os.OpenFile(srv.AccessLogfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		srv.accessLog = log.New(srv.accessLogWriter, "ACCESS: ", log.LstdFlags|log.Lshortfile)
 	} else {
@@ -206,7 +190,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	if srv.Logfile != "" {
 		srv.logWriter, err = os.OpenFile(srv.Logfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		log.SetOutput(srv.logWriter)
 	}
@@ -259,15 +243,15 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 	// Disallow http -> https redirect if not using standard ports
 	if srv.HTTPRedirect && srv.Port != "" {
-		return nil, fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port)
+		return fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port)
 	}
 	lifetime, err := time.ParseDuration(srv.ContainerLifetime)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, lifetime, srv.Persistant)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tkn := newKey(defaultKeySize)
 	srv.pool = p
@@ -282,7 +266,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.pool.disableJupyterAuth = srv.DisableJupyterAuth
 	srv.enableOAuth = srv.OAuthConfig.RegExp != "" || len(srv.OAuthConfig.WhiteList) > 0
 	if !srv.enableOAuth && srv.Persistant {
-		return nil, fmt.Errorf("OAuth must be enabled in persistent mode")
+		return fmt.Errorf("OAuth must be enabled in persistent mode")
 	}
 	if srv.enableOAuth {
 		// OAuth
@@ -290,12 +274,12 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		// FIXME(kyle): errors after we add files
 		apiToken, err := ioutil.ReadFile(filepath.Join(srv.AssetPath, "token"))
 		if err != nil {
-			return nil, err
+			return err
 		}
 		srv.oauthToken = strings.TrimSpace(string(apiToken))
 		apiSecret, err := ioutil.ReadFile(filepath.Join(srv.AssetPath, "secret"))
 		if err != nil {
-			return nil, err
+			return err
 		}
 		srv.oauthSecret = strings.TrimSpace(string(apiSecret))
 		// If we don't have a config hostname, try.  This doesn't use our cname, so
@@ -336,7 +320,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			break
 		default:
 			if srv.oauthMatch, err = regexp.Compile(srv.OAuthConfig.RegExp); err != nil {
-				return nil, err
+				return err
 			}
 		}
 	}
@@ -387,7 +371,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 	templateFiles, err := filepath.Glob(filepath.Join(srv.AssetPath, "templates", "*.html"))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var templatePaths []string
 	for _, t := range templateFiles {
@@ -434,7 +418,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			}
 		}
 	}()
-	return srv, nil
+	return nil
 }
 
 func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
@@ -1225,27 +1209,35 @@ func (srv *notebookServer) Start() {
 }
 
 func main() {
-	assetPath := flag.String("assets", "./assets", "path to html and oauth tokens")
-	lifetime := flag.Duration("life", "1h", "container lifetime formatted in duration format")
-	maxContainers := flag.Int("max", 100, "maximum living containers")
-	persistant := flag.Bool("persistant", false, "enable persistant images (experimental)")
-	imageRegexp := flag.String("imgregexp", ".*", "image name regular expression to expose")
-	addr := flag.String("addr", "", "address to listen on (:8888, :http, :https, \"\" is automagic")
-	host := flag.String("host", "", "hostname to use in redirects for oauth2 and acme")
-	useACME := flag.String("acme", true, "use ACME via letsencrypt, overrides tls flags")
-	tlsCert := flag.String("tlscert", "", "path to tls certificate")
-	tlsKey := flag.String("tlskey", "", "path to tls key")
+	srv := &notebookServer{}
+	flag.StringVar(&srv.AccessLogfile, "accesslog", "", "file path for access log")
+	flag.StringVar(&srv.AssetPath, "assets", "./assets", "path to html and oauth tokens")
+	flag.StringVar(&srv.ContainerLifetime, "life", "1h", "container lifetime formatted in duration format")
+	flag.BoolVar(&srv.DisableJupyterAuth, "nojupyterauth", true, "enable jupyter authentication")
+	flag.BoolVar(&srv.EnableCSP, "csp", false, "enable csp (experimental)")
+	flag.BoolVar(&srv.EnableDockerPush, "dockerpush", false, "enable pushing to docker hub (experimental)")
+	flag.StringVar(&srv.GithubRepo, "github", "", "master github repo (experimental)")
+	flag.BoolVar(&srv.EnablePProf, "pprof", false, "expose net/http/pprof endpoints")
+	flag.BoolVar(&srv.EnableStats, "stats", false, "expose the /stats page")
+	flag.StringVar(&srv.ImageRegexp, "imgregexp", ".*", "image name regular expression to expose")
+	flag.IntVar(&srv.MaxContainers, "max", 100, "maximum living containers")
+	flag.StringVar(&srv.Logfile, "log", "", "file path for log")
+	flag.BoolVar(&srv.Persistant, "persistant", false, "enable persistant images (experimental)")
+	flag.StringVar(&srv.Port, "addr", ":8888", "address to listen on (:8888, :http, :https, \"\" is automagic")
+	flag.BoolVar(&srv.RotateLogs, "rotate", false, "manually rotate the logs")
+	flag.StringVar(&srv.Host, "host", "127.0.0.1", "hostname to use in redirects for oauth2 and acme")
+	flag.BoolVar(&srv.HTTPRedirect, "redirect", false, "redirect http to https")
+	flag.BoolVar(&srv.EnableACME, "acme", false, "use ACME via letsencrypt, overrides tls flags")
+	flag.StringVar(&srv.TLSCert, "tlscert", "", "path to tls certificate")
+	flag.StringVar(&srv.TLSKey, "tlskey", "", "path to tls key")
 	whitelist := flag.String("oawhite", "", "comma separated whitelist of valid OAuth2 emails")
-	userRegexp := flag.String("oaregexp", ".*", "regular expression for valid OAuth2 emails")
+	flag.StringVar(&srv.OAuthConfig.RegExp, "oaregexp", ".*", "regular expression for valid OAuth2 emails")
+	flag.Parse()
 
-	enableJupyterAuth = flag.Bool("jupyterauth", false, "enable jupyter authentication")
-
-	enablePProf = flag.Bool("pprof", false, "expose net/http/pprof endpoints")
-	enableStats = flag.Bool("stats", false, "expose the /stats page")
-	debug = flag.Bool("d", false, "debugging mode (pprof, :8888, stats, no oauth)")
+	srv.OAuthConfig.WhiteList = strings.Split(*whitelist, ",")
 
 	// newNotebookServer will read flags
-	srv, err := newNotebookServer(cfg)
+	err := srv.init()
 	if err != nil {
 		log.Fatal(err)
 	}
