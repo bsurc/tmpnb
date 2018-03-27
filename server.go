@@ -1236,7 +1236,6 @@ func main() {
 
 	srv.OAuthConfig.WhiteList = strings.Split(*whitelist, ",")
 
-	// newNotebookServer will read flags
 	err := srv.init()
 	if err != nil {
 		log.Fatal(err)
