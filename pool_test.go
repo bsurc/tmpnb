@@ -86,7 +86,7 @@ func TestCollection(t *testing.T) {
 	p.startCollector(time.Second)
 	nb, err := p.newNotebook(testNotebook, false, "")
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	time.Sleep(time.Second * 10)
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/?token=", nb.port))
@@ -116,7 +116,7 @@ func TestZombies(t *testing.T) {
 		t.Error(err)
 	}
 	if len(p.containerMap) != 1 {
-		t.Error("failed to create container")
+		t.Fatal("failed to create container")
 	}
 	// manually remove the container from the container map, and drop the port
 	p.portSet.Drop(nb.port)
