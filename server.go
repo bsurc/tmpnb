@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"html/template"
 	"io"
@@ -1224,10 +1225,26 @@ func (srv *notebookServer) Start() {
 }
 
 func main() {
-	cfg := ""
-	if len(os.Args) > 1 {
-		cfg = os.Args[1]
-	}
+	assetPath := flag.String("assets", "./assets", "path to html and oauth tokens")
+	lifetime := flag.Duration("life", "1h", "container lifetime formatted in duration format")
+	maxContainers := flag.Int("max", 100, "maximum living containers")
+	persistant := flag.Bool("persistant", false, "enable persistant images (experimental)")
+	imageRegexp := flag.String("imgregexp", ".*", "image name regular expression to expose")
+	addr := flag.String("addr", "", "address to listen on (:8888, :http, :https, \"\" is automagic")
+	host := flag.String("host", "", "hostname to use in redirects for oauth2 and acme")
+	useACME := flag.String("acme", true, "use ACME via letsencrypt, overrides tls flags")
+	tlsCert := flag.String("tlscert", "", "path to tls certificate")
+	tlsKey := flag.String("tlskey", "", "path to tls key")
+	whitelist := flag.String("oawhite", "", "comma separated whitelist of valid OAuth2 emails")
+	userRegexp := flag.String("oaregexp", ".*", "regular expression for valid OAuth2 emails")
+
+	enableJupyterAuth = flag.Bool("jupyterauth", false, "enable jupyter authentication")
+
+	enablePProf = flag.Bool("pprof", false, "expose net/http/pprof endpoints")
+	enableStats = flag.Bool("stats", false, "expose the /stats page")
+	debug = flag.Bool("d", false, "debugging mode (pprof, :8888, stats, no oauth)")
+
+	// newNotebookServer will read flags
 	srv, err := newNotebookServer(cfg)
 	if err != nil {
 		log.Fatal(err)
