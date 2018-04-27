@@ -1,5 +1,5 @@
 {
-  "asset_path": "/opt/src/github.com/bsurc/tmpnb/assets",
+  "asset_path": "./assets",
   "container_lifetime": "10m",
   "disable_jupyter_auth": false,
   "enable_acme": false,

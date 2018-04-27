@@ -20,12 +20,6 @@
   version = "v1.0.4"
 
 [[projects]]
-  branch = "master"
-  name = "github.com/StackExchange/wmi"
-  packages = ["."]
-  revision = "ea383cf3ba6ec950874b8486cd72356d007c768f"
-
-[[projects]]
   name = "github.com/docker/distribution"
   packages = ["digest","reference"]
   revision = "48294d928ced5dd9b378f7fd7c6f5da3ff3f2c89"
@@ -50,12 +44,6 @@
   version = "v0.3.2"
 
 [[projects]]
-  name = "github.com/go-ole/go-ole"
-  packages = [".","oleutil"]
-  revision = "0e87ea779d9deb219633b828a023b32e1244dd57"
-  version = "v1.2.0"
-
-[[projects]]
   branch = "master"
   name = "github.com/golang/protobuf"
   packages = ["proto"]
@@ -72,12 +60,6 @@
   packages = ["."]
   revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
   version = "v0.8.0"
-
-[[projects]]
-  name = "github.com/shirou/gopsutil"
-  packages = ["internal/common","mem"]
-  revision = "7ec06ec280df1dd1f08befc535049d49d63ae18a"
-  version = "v2.17.12"
 
 [[projects]]
   branch = "master"
@@ -112,6 +94,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "3ca6af302436a1fd06011cb5b8098eb5e0c82dc810c8363c56ec9d22106e461e"
+  inputs-digest = "a146763808a2defda33f868f1ee22d5bfde7db96f31d95a20c0b34ae6303edf6"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -36,7 +37,6 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
-	"github.com/shirou/gopsutil/mem"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -434,6 +434,38 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		}
 	}()
 	return srv, nil
+}
+
+func memInfo() (total, free, avail uint64) {
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return
+	}
+	s := bufio.NewScanner(f)
+	i := 0
+	for s.Scan() {
+		tkn := strings.Split(s.Text(), ":")
+		if len(tkn) < 2 {
+			continue
+		}
+		sz := strings.Fields(tkn[1])
+		x, _ := strconv.Atoi(sz[0])
+		switch tkn[0] {
+		case "MemTotal":
+			total = uint64(x)
+			i++
+		case "MemFree":
+			free = uint64(x)
+			i++
+		case "MemAvailable":
+			avail = uint64(x)
+			i++
+		}
+		if i == 3 {
+			break
+		}
+	}
+	return
 }
 
 func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
@@ -1102,12 +1134,13 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "Go version: %s\n", runtime.Version())
-	vm, _ := mem.VirtualMemory()
+	total, free, avail := memInfo()
+	used := total - free
 	fmt.Fprintf(w, "Memory Stats\n")
 	fmt.Fprintf(tw, "Type\tBytes\tMB\n")
-	fmt.Fprintf(tw, "Used:\t%d\t%d\n", vm.Used, vm.Used>>20)
-	fmt.Fprintf(tw, "Free:\t%d\t%d\n", vm.Free, vm.Free>>20)
-	fmt.Fprintf(tw, "Available:\t%d\t%d\n", vm.Available, vm.Available>>20)
+	fmt.Fprintf(tw, "Used:\t%d\t%d\n", used, used>>20)
+	fmt.Fprintf(tw, "Free:\t%d\t%d\n", free, free>>20)
+	fmt.Fprintf(tw, "Available:\t%d\t%d\n", avail, avail>>20)
 	tw.Flush()
 	fmt.Fprintln(w)
 	t := srv.pool.NextCollection()
