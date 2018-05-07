@@ -1,7 +1,7 @@
 # Copyright (c) Jupyter Development Team.
 # Distributed under the terms of the Modified BSD License.
-# Derived from scipy-notebook, with minor modification.  Original maintainer is
-# the Jupyter Project.
+# Derived from minimal-notebook, with minor modification.  Original maintainer
+# is the Jupyter Project.
 FROM jupyter/minimal-notebook
 
 MAINTAINER Kyle Shannon <kyle@pobox.com>
@@ -16,6 +16,11 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 USER $NB_USER
+
+RUN conda install --quiet --yes --channel glotzer \
+    'matplotlib=2.0*' && \
+    conda remove --quiet --yes --force qt pyqt && \
+    conda clean -tipsy
 
 WORKDIR $HOME
 

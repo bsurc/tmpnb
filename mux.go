@@ -220,6 +220,15 @@ func (mux *ServeMux) HandleFunc(pattern string, handler func(http.ResponseWriter
 	mux.Handle(pattern, http.HandlerFunc(handler))
 }
 
+// Registered checks if a pattern is already registered in the mux, avoiding a
+// double register panic.
+func (mux *ServeMux) Registered(pattern string) bool {
+	mux.mu.Lock()
+	_, ok := mux.m[pattern]
+	mux.mu.Unlock()
+	return ok
+}
+
 // Deregister removes the pattern from the mux.
 func (mux *ServeMux) Deregister(pattern string) {
 	mux.mu.Lock()

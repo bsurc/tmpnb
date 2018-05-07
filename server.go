@@ -5,7 +5,9 @@
 package main
 
 import (
+	"archive/tar"
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/tls"
@@ -26,6 +28,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -34,7 +37,6 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
-	"github.com/shirou/gopsutil/mem"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -117,6 +119,12 @@ type notebookServer struct {
 	oauthMatch *regexp.Regexp
 	// oauthWhiteList is automagically enabled user emails
 	oauthWhiteList map[string]struct{}
+	// buildMu guards buildMap
+	buildMu sync.Mutex
+	// buildMap holds names of images currently being built
+	buildMap map[string]struct{}
+	// githubToken holds the github secret for the push event
+	githubToken string
 	// redirectLock locks the redirectMap
 	redirectMu sync.Mutex
 	// redirectMap handles initial incoming requests before the user is
@@ -144,19 +152,22 @@ type notebookServer struct {
 	DisableJupyterAuth bool   `json:"disable_jupyter_auth"`
 	EnableCSP          bool   `json:"enable_csp"`
 	EnableDockerPush   bool   `json:"enable_docker_push"`
-	EnablePProf        bool   `json:"enable_pprof"`
-	EnableStats        bool   `json:"enable_stats"`
-	ImageRegexp        string `json:"image_regexp"`
-	MaxContainers      int    `json:"max_containers"`
-	Logfile            string `json:"logfile"`
-	Port               string `json:"port"`
-	RotateLogs         bool   `json:"rotate_logs"`
-	Host               string `json:"host"`
-	HTTPRedirect       bool   `json:"http_redirect"`
-	EnableACME         bool   `json:"enable_acme"`
-	TLSCert            string `json:"tls_cert"`
-	TLSKey             string `json:"tls_key"`
-	OAuthConfig        struct {
+	// Github repository name (bsurc/tmpnb)
+	GithubRepo    string `json:"github_repo"`
+	EnablePProf   bool   `json:"enable_pprof"`
+	EnableStats   bool   `json:"enable_stats"`
+	ImageRegexp   string `json:"image_regexp"`
+	MaxContainers int    `json:"max_containers"`
+	Logfile       string `json:"logfile"`
+	Persistant    bool   `json:"persistent"`
+	Port          string `json:"port"`
+	RotateLogs    bool   `json:"rotate_logs"`
+	Host          string `json:"host"`
+	HTTPRedirect  bool   `json:"http_redirect"`
+	EnableACME    bool   `json:"enable_acme"`
+	TLSCert       string `json:"tls_cert"`
+	TLSKey        string `json:"tls_key"`
+	OAuthConfig   struct {
 		WhiteList []string `json:"whitelist"`
 		RegExp    string   `json:"match"`
 	} `json:"oauth_confg"`
@@ -253,7 +264,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, lifetime)
+	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, lifetime, srv.Persistant)
 	if err != nil {
 		return nil, err
 	}
@@ -269,6 +280,9 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	}
 	srv.pool.disableJupyterAuth = srv.DisableJupyterAuth
 	srv.enableOAuth = srv.OAuthConfig.RegExp != "" || len(srv.OAuthConfig.WhiteList) > 0
+	if !srv.enableOAuth && srv.Persistant {
+		return nil, fmt.Errorf("OAuth must be enabled in persistent mode")
+	}
 	if srv.enableOAuth {
 		// OAuth
 		srv.sessions = map[string]*session{}
@@ -332,6 +346,8 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		log.Print(s)
 	}
 
+	srv.buildMap = map[string]struct{}{}
+
 	srv.redirectMap = map[string]string{}
 
 	log.Print("OAuth2 regexp:", srv.OAuthConfig.RegExp)
@@ -347,6 +363,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
 	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
+	srv.mux.Handle("/github/push/", http.HandlerFunc(srv.githubPushHandler))
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
@@ -417,6 +434,38 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		}
 	}()
 	return srv, nil
+}
+
+func memInfo() (total, free, avail uint64) {
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return
+	}
+	s := bufio.NewScanner(f)
+	i := 0
+	for s.Scan() {
+		tkn := strings.Split(s.Text(), ":")
+		if len(tkn) < 2 {
+			continue
+		}
+		sz := strings.Fields(tkn[1])
+		x, _ := strconv.Atoi(sz[0])
+		switch tkn[0] {
+		case "MemTotal":
+			total = uint64(x)
+			i++
+		case "MemFree":
+			free = uint64(x)
+			i++
+		case "MemAvailable":
+			avail = uint64(x)
+			i++
+		}
+		if i == 3 {
+			break
+		}
+	}
+	return
 }
 
 func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
@@ -634,22 +683,22 @@ func (srv *notebookServer) statusHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// ping && running
-	var tmpnb *tempNotebook
+	var nb *notebook
 	for _, v := range srv.pool.containerMap {
 		if v.id == id {
-			tmpnb = v
+			nb = v
 			break
 		}
 	}
-	if tmpnb == nil {
+	if nb == nil {
 		log.Printf("couldn't find container in containerMap: %s", id)
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	pingURL := url.URL{
 		Scheme: "http",
-		Host:   strings.Split(r.Host, ":")[0] + fmt.Sprintf(":%d", tmpnb.port),
-		Path:   path.Join("/book", tmpnb.key) + "/",
+		Host:   strings.Split(r.Host, ":")[0] + fmt.Sprintf(":%d", nb.port),
+		Path:   nb.path(),
 	}
 	log.Printf("ping target: %s", pingURL.String())
 	var resp *http.Response
@@ -710,13 +759,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		imageName = defaultNotebook
 	}
 
-	// Make old links backwards compatible.  Add a tag if it doesn't have one.
-	// Use 'latest' as the default.
-	if !strings.Contains(imageName, ":") {
-		imageName += ":latest"
-	}
-
-	if _, ok := srv.pool.availableImages[imageName]; !ok {
+	if _, ok := srv.pool.baseImages[imageName]; !ok {
 		http.Error(w, fmt.Sprintf("invalid image name: %s", imageName), http.StatusBadRequest)
 		log.Printf("invalid image name: %s", imageName)
 		return
@@ -724,16 +767,33 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 
 	_, pull := r.Form["pull"]
 
-	tmpnb, err := srv.pool.newNotebook(imageName, email, pull)
+	srv.buildMu.Lock()
+	_, ok := srv.buildMap[imageName]
+	srv.buildMu.Unlock()
+	if ok {
+		http.Error(w, "image is currently being re-built", http.StatusServiceUnavailable)
+		return
+	}
+	nb, err := srv.pool.newNotebook(imageName, email, pull)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		log.Print(err)
 		return
 	}
 
+	if srv.Persistant {
+		// If we have a valid notebook, it may already be running in persistent
+		// mode.  Check the mux and see if the path is already registered.  If it
+		// is, just point it to the existing notebook.
+		if srv.mux.Registered(nb.path()) {
+			http.Redirect(w, r, nb.path(), http.StatusTemporaryRedirect)
+			return
+		}
+	}
+
 	proxyURL := url.URL{
 		Scheme: "http",
-		Host:   fmt.Sprintf("localhost:%d", tmpnb.port),
+		Host:   fmt.Sprintf("localhost:%d", nb.port),
 	}
 	log.Printf("reverse proxy URL: %s", proxyURL.String())
 
@@ -750,11 +810,11 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			IdleConnTimeout: 30 * time.Second,
 		}
 	*/
-	handlerPath := path.Join("/book", tmpnb.key) + "/"
+	handlerPath := nb.path()
 	log.Printf("handler: %s", handlerPath)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		// Read the cookie for session information and compare the
-		// email to the email provided by the tmpnb. If they match,
+		// email to the email provided by the nb. If they match,
 		// allow access, else redirect them to /list
 		if srv.enableOAuth {
 			email := ""
@@ -770,19 +830,19 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 			if s != nil {
 				email = s.get("email")
 			}
-			if email != tmpnb.userEmail {
+			if email != nb.email {
 				http.Redirect(w, r, "/list", http.StatusUnauthorized)
 				return
 			}
 		}
 
-		tmpnb.Lock()
-		tmpnb.lastAccessed = time.Now()
-		tmpnb.Unlock()
+		nb.Lock()
+		nb.lastAccessed = time.Now()
+		nb.Unlock()
 		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		if isWebsocket(r) {
 			log.Print("proxying to websocket handler")
-			f := websocketProxy(fmt.Sprintf(":%d", tmpnb.port))
+			f := websocketProxy(fmt.Sprintf(":%d", nb.port))
 			f.ServeHTTP(w, r)
 			return
 		}
@@ -805,7 +865,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		Path  string
 		Token string
 	}{
-		ID:    tmpnb.id,
+		ID:    nb.id,
 		Path:  handlerURL.Path,
 		Token: srv.token,
 	})
@@ -836,6 +896,158 @@ func (srv *notebookServer) privacyHandler(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		log.Print(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Request) {
+	if srv.GithubRepo == "" {
+		// If the updating from Github is disabled, just tell Github to go away
+		// nicely.
+		w.WriteHeader(http.StatusOK)
+	}
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// ping okay
+	if r.Header.Get("X-GitHub-Event") == "ping" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Header.Get("Content-Type") != "application/json" ||
+		r.Header.Get("X-GitHub-Event") != "push" ||
+		!strings.HasPrefix(r.UserAgent(), "GitHub-Hookshot/") {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	var push githubPush
+	err := json.NewDecoder(r.Body).Decode(&push)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Print(err)
+		return
+	}
+	if push.Repository.FullName != srv.GithubRepo {
+		w.WriteHeader(http.StatusPreconditionFailed)
+		return
+	}
+	// TODO(kyle): check signature/secret/HMAC
+
+	// If any of the docker/$PI_NAME/Dockerfile has changes, download the file
+	// from master, run docker build.
+	var build []string
+	var remove []string
+	for _, commit := range push.Commits {
+		allChanges := append(commit.Added, commit.Modified...)
+		for _, file := range allChanges {
+			if strings.HasSuffix(file, "Dockerfile") {
+				build = append(build, file)
+			}
+		}
+		for _, file := range commit.Removed {
+			if strings.HasSuffix(file, "Dockerfile") {
+				remove = append(remove, file)
+			}
+		}
+	}
+	if build == nil && remove == nil {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// TODO(kyle): should we remove the dropped files?  This would 'mirror' the
+	// repo more consistently.
+	for _, r := range remove {
+		_ = r
+		/*
+			ctx := context.Background()
+			cli, err := client.NewEnvClient()
+			resp, err := cli.ImageRemove(ctx, imageID string, options types.ImageRemoveOptions)
+			srv.pool.Lock()
+			delete(srv.pool.availableImages[tag])
+			srv.pool.Unlock()
+		*/
+	}
+
+	// Write OK early, let us do work in the background.  Github doesn't need to
+	// know any errors we encounter when building the images.
+	w.WriteHeader(http.StatusOK)
+
+	for _, d := range build {
+		// TODO(kyle): look at granularity here.  Probably move the goroutine up
+		// and let it chug one at a time.  If there was a blanket update of all
+		// containers or a lot added at once, it would be bad.
+		dockerfile := d
+		go func() {
+			u := url.URL{
+				Scheme: "https",
+				Host:   "github.com",
+				// FIXME(kyle): branch may not be master or xxx
+				Path: filepath.Join("/bsurc/tmpnb/raw/", "git-push", dockerfile),
+			}
+			resp, err := http.Get(u.String())
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				log.Print(err)
+				return
+			}
+			body, err := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				log.Print(err)
+				return
+			}
+			buf := &bytes.Buffer{}
+			tw := tar.NewWriter(buf)
+			h := &tar.Header{
+				Name:     "Dockerfile",
+				Size:     int64(len(body)),
+				Typeflag: tar.TypeReg,
+			}
+			tw.WriteHeader(h)
+			_, err = tw.Write(body)
+			if err != nil {
+				log.Print(err)
+				return
+			}
+			err = tw.Close()
+			if err != nil {
+				log.Print(err)
+				return
+			}
+			tag := "boisestate/" + strings.Split(dockerfile, "/")[1] + "-notebook:latest"
+			srv.buildMu.Lock()
+			srv.buildMap[tag] = struct{}{}
+			srv.buildMu.Unlock()
+			cli, err := client.NewEnvClient()
+			if err != nil {
+				log.Print(err)
+				return
+			}
+			ctx := context.Background()
+			buildResp, err := cli.ImageBuild(ctx, buf, types.ImageBuildOptions{
+				Tags:           []string{tag},
+				Context:        buf,
+				SuppressOutput: true,
+				PullParent:     true,
+				//BuildArgs   map[string]*string
+				//Target      string
+			})
+
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				srv.buildMu.Lock()
+				delete(srv.buildMap, tag)
+				srv.buildMu.Unlock()
+				return
+			}
+			buildResp.Body.Close()
+			srv.buildMu.Lock()
+			delete(srv.buildMap, tag)
+			srv.buildMu.Unlock()
+		}()
 	}
 }
 
@@ -898,9 +1110,11 @@ func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Requ
 // listImagesHandler lists html links to the different docker images.
 func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Request) {
 	images := []string{}
-	for k := range srv.pool.availableImages {
+	srv.pool.Lock()
+	for k := range srv.pool.baseImages {
 		images = append(images, k)
 	}
+	srv.pool.Unlock()
 	sort.Slice(images, func(i, j int) bool {
 		return images[i] < images[j]
 	})
@@ -920,16 +1134,19 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	tw := tabwriter.NewWriter(w, 0, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "Go version: %s\n", runtime.Version())
-	vm, _ := mem.VirtualMemory()
+	total, free, avail := memInfo()
+	used := total - free
 	fmt.Fprintf(w, "Memory Stats\n")
 	fmt.Fprintf(tw, "Type\tBytes\tMB\n")
-	fmt.Fprintf(tw, "Used:\t%d\t%d\n", vm.Used, vm.Used>>20)
-	fmt.Fprintf(tw, "Free:\t%d\t%d\n", vm.Free, vm.Free>>20)
-	fmt.Fprintf(tw, "Available:\t%d\t%d\n", vm.Available, vm.Available>>20)
+	fmt.Fprintf(tw, "Used:\t%d\t%d\n", used, used>>20)
+	fmt.Fprintf(tw, "Free:\t%d\t%d\n", free, free>>20)
+	fmt.Fprintf(tw, "Available:\t%d\t%d\n", avail, avail>>20)
 	tw.Flush()
 	fmt.Fprintln(w)
 	t := srv.pool.NextCollection()
 	fmt.Fprintf(w, "Next container reclamation: %s (%s)\n", t, t.Sub(time.Now()))
+	fmt.Fprintf(w, "Persistent mode: %t\n", srv.Persistant)
+	fmt.Fprintf(w, "Container lifetime: %s\n", srv.pool.containerLifetime)
 	// XXX: these are copies, they are local and we don't need to hold locks when
 	// accessing them.
 	nbs := srv.pool.activeNotebooks()
@@ -993,29 +1210,6 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, string(x))
 	}
-	fs, err := lsof()
-	if err != nil {
-		return
-	}
-	fsm := map[string]int{}
-	for _, f := range fs {
-		fsm[fmt.Sprintf("%s (%d)", f.name, f.pid)]++
-	}
-	type ord struct {
-		name string
-		n    int
-	}
-	var ords []ord
-	for k, v := range fsm {
-		ords = append(ords, ord{k, v})
-	}
-	sort.Slice(ords, func(i, j int) bool {
-		return ords[i].n > ords[j].n
-	})
-	fmt.Fprintf(tw, "process\topen files\n")
-	for _, o := range ords {
-		fmt.Fprintf(tw, "%s\t%d\n", o.name, o.n)
-	}
 	tw.Flush()
 }
 
@@ -1023,22 +1217,6 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 func (srv *notebookServer) Start() {
 	if (srv.TLSCert != "" && srv.TLSKey != "") || srv.EnableACME {
 		if srv.HTTPRedirect {
-			httpServer := http.Server{
-				ReadTimeout:  5 * time.Second,
-				WriteTimeout: 5 * time.Second,
-				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					u := *r.URL
-					u.Scheme = "https"
-					u.Host = r.Host
-					r.ParseForm()
-					u.RawPath = r.Form.Encode()
-					w.Header().Set("Connection", "close")
-					http.Redirect(w, r, u.String(), http.StatusPermanentRedirect)
-				}),
-			}
-			go func() {
-				log.Fatal(httpServer.ListenAndServe())
-			}()
 		}
 		if hardenTLS {
 			// Straight outta https://blog.cloudflare.com/exposing-go-on-the-internet/
@@ -1071,7 +1249,17 @@ func (srv *notebookServer) Start() {
 		}
 		if srv.EnableACME {
 			log.Print("using acme via letsencrypt")
-			log.Fatal(srv.Serve(autocert.NewListener(srv.Host)))
+			m := &autocert.Manager{
+				Cache:      autocert.DirCache("/opt/acme/"),
+				Prompt:     autocert.AcceptTOS,
+				HostPolicy: autocert.HostWhitelist(srv.Host),
+			}
+			go func() {
+				log.Fatal(http.ListenAndServe(":http", m.HTTPHandler(nil)))
+			}()
+			srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate}
+			log.Fatal(srv.ListenAndServeTLS("", ""))
+
 		} else {
 			log.Print("using standard tls")
 			log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))

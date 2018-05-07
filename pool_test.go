@@ -42,9 +42,9 @@ func TestImageMatch(t *testing.T) {
 }
 
 func TestNotebookQueue(t *testing.T) {
-	var nbs []tempNotebook
+	var nbs []notebook
 	for i := 0; i < 3; i++ {
-		nb := tempNotebook{
+		nb := notebook{
 			id:           fmt.Sprintf("%d", i),
 			key:          fmt.Sprintf("key_%d", i),
 			imageName:    fmt.Sprintf("image_%d", i),
@@ -94,10 +94,11 @@ func TestNewNotebook(t *testing.T) {
 	if testing.Short() {
 		t.Skip(skipDocker)
 	}
-	p, err := newNotebookPool(".*", 2, time.Minute*2)
+	p, err := newNotebookPool(".*", 2, time.Minute*2, false)
 	if err != nil {
 		t.Fatal(err)
 	}
+	p.enableReserve = true
 	p.disableJupyterAuth = true
 	p.stopCollector()
 	nb, err := p.newNotebook("jupyter/minimal-notebook", "", false)
@@ -120,7 +121,7 @@ func TestCollection(t *testing.T) {
 	if testing.Short() {
 		t.Skip(skipDocker)
 	}
-	p, err := newNotebookPool(".*", 2, time.Second*5)
+	p, err := newNotebookPool(".*", 2, time.Second*5, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,13 +131,16 @@ func TestCollection(t *testing.T) {
 	p.startCollector(time.Second)
 	nb, err := p.newNotebook("jupyter/minimal-notebook", "", false)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
-	time.Sleep(time.Second * 6)
+	time.Sleep(time.Second * 10)
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/?token=", nb.port))
-	if err == nil {
-		resp.Body.Close()
-		t.Error("container should be dead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if err == nil && resp.StatusCode == 200 {
+		t.Errorf("container should be dead")
 	}
 	n := len(p.activeNotebooks())
 	if n != 0 {
@@ -149,7 +153,7 @@ func TestZombies(t *testing.T) {
 	if testing.Short() {
 		t.Skip(skipDocker)
 	}
-	p, err := newNotebookPool(".*", 2, time.Minute*2)
+	p, err := newNotebookPool(".*", 2, time.Minute*2, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +164,7 @@ func TestZombies(t *testing.T) {
 		t.Error(err)
 	}
 	if len(p.containerMap) != 1 {
-		t.Error("failed to create container")
+		t.Fatal("failed to create container")
 	}
 	// manually remove the container from the container map, and drop the port
 	p.portSet.Drop(nb.port)
