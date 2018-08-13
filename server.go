@@ -6,13 +6,11 @@ package main
 
 import (
 	"bufio"
-	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -73,16 +71,8 @@ type notebookServer struct {
 	*http.Server
 	// html templates
 	templates *template.Template
-	// accessLogWriter is the access logging Writer
-	accessLogWriter io.Writer
-	// accessLog logs access
-	accessLog *log.Logger
-	// logWriter is the error logging Writer, the standard logger handles all
-	// others.
-	logWriter io.Writer
 
 	//Configuration options for the server
-	AccessLogfile      string `json:"access_logfile"`
 	AssetPath          string `json:"asset_path"`
 	ContainerLifetime  string `json:"container_lifetime"`
 	DisableJupyterAuth bool   `json:"disable_jupyter_auth"`
@@ -90,10 +80,8 @@ type notebookServer struct {
 	EnableStats        bool   `json:"enable_stats"`
 	ImageRegexp        string `json:"image_regexp"`
 	MaxContainers      int    `json:"max_containers"`
-	Logfile            string `json:"logfile"`
 	Persistant         bool   `json:"persistent"`
 	Port               string `json:"port"`
-	RotateLogs         bool   `json:"rotate_logs"`
 	Host               string `json:"host"`
 	HTTPRedirect       bool   `json:"http_redirect"`
 	EnableACME         bool   `json:"enable_acme"`
@@ -125,69 +113,6 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		}
 	}
 	var err error
-	if srv.AccessLogfile != "" {
-		srv.accessLogWriter, err = os.OpenFile(srv.AccessLogfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
-		if err != nil {
-			return nil, err
-		}
-		srv.accessLog = log.New(srv.accessLogWriter, "ACCESS: ", log.LstdFlags|log.Lshortfile)
-	} else {
-		srv.accessLog = log.New(os.Stdout, "ACCESS: ", log.LstdFlags|log.Lshortfile)
-	}
-	if srv.Logfile != "" {
-		srv.logWriter, err = os.OpenFile(srv.Logfile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
-		if err != nil {
-			return nil, err
-		}
-		log.SetOutput(srv.logWriter)
-	}
-	// Set up some basic log rotation
-	if (srv.AccessLogfile != "" || srv.Logfile != "") && srv.RotateLogs {
-		t := time.NewTicker(time.Hour * 24 * 14)
-		go func() {
-			for {
-				select {
-				case <-t.C:
-					for _, fname := range []string{srv.AccessLogfile, srv.Logfile} {
-						if fname == "" {
-							continue
-						}
-						fout, err := os.Create(fname + "." + time.Now().Format("20060102150405") + ".gz")
-						if err != nil {
-							log.Print(err)
-							continue
-						}
-						w := gzip.NewWriter(fout)
-						fin, err := os.Open(fname)
-						if err != nil {
-							log.Print(err)
-							fout.Close()
-							continue
-						}
-						_, err = io.Copy(w, fin)
-						w.Flush()
-						w.Close()
-						fout.Close()
-						fin.Close()
-						os.Truncate(fname, 0)
-						logs, err := filepath.Glob(fname + "*" + ".gz")
-						if err != nil {
-							log.Print(err)
-							continue
-						}
-						sort.Strings(logs)
-						for len(logs) > 5 {
-							err = os.Remove(logs[0])
-							logs = logs[1:]
-						}
-					}
-				default:
-					time.Sleep(time.Hour * 24)
-				}
-			}
-		}()
-	}
-
 	// Disallow http -> https redirect if not using standard ports
 	if srv.HTTPRedirect && srv.Port != "" {
 		return nil, fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port)
@@ -308,23 +233,6 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		if err != nil {
 			log.Print(err)
 		}
-		if c, ok := srv.logWriter.(io.Closer); ok {
-			log.Print("closing log file")
-			err = c.Close()
-			// If we hit an error, dump it to stdout.
-			log.SetOutput(os.Stdout)
-			if err != nil {
-				log.Print(err)
-			}
-		}
-		if c, ok := srv.accessLogWriter.(io.Closer); ok {
-			log.Print("closing log file")
-			err = c.Close()
-			// If we hit an error, dump it to stdout.
-			if err != nil {
-				log.Print(err)
-			}
-		}
 		os.Exit(0)
 	}()
 	go func() {
@@ -373,7 +281,7 @@ func memInfo() (total, free, avail uint64) {
 
 func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
-		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
+		log.Printf("ACCESS: %s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		if srv.HTTPRedirect {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
@@ -573,7 +481,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		nb.Lock()
 		nb.lastAccessed = time.Now()
 		nb.Unlock()
-		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
+		log.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		if isWebsocket(r) {
 			log.Print("proxying to websocket handler")
 			f := websocketProxy(fmt.Sprintf(":%d", nb.port))
