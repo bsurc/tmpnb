@@ -55,8 +55,6 @@ const (
 	//
 	// in the future.  See RFC 5322 (https://tools.ietf.org/html/rfc5322).
 	bsuRegexp = `^.+@(u\.)?boisestate.edu$`
-	// use the hardened TLS config
-	hardenTLS = false
 )
 
 func init() {
@@ -968,35 +966,6 @@ func (srv *notebookServer) Start() {
 	if (srv.TLSCert != "" && srv.TLSKey != "") || srv.EnableACME {
 		if srv.HTTPRedirect {
 		}
-		if hardenTLS {
-			// Straight outta https://blog.cloudflare.com/exposing-go-on-the-internet/
-			srv.Server.TLSConfig = &tls.Config{
-				// Causes servers to use Go's default ciphersuite preferences,
-				// which are tuned to avoid attacks. Does nothing on clients.
-				PreferServerCipherSuites: true,
-				// Only use curves which have assembly implementations
-				CurvePreferences: []tls.CurveID{
-					tls.CurveP256,
-					tls.X25519,
-				},
-				// If you can take the compatibility loss of the Modern configuration, you
-				// should then also set MinVersion and CipherSuites.
-				MinVersion: tls.VersionTLS12,
-				CipherSuites: []uint16{
-					tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-					tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-
-					// Best disabled, as they don't provide Forward Secrecy,
-					// but might be necessary for some clients
-					// tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-					// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-				},
-			}
-		}
 		if srv.EnableACME {
 			log.Print("using acme via letsencrypt")
 			m := &autocert.Manager{
@@ -1009,7 +978,6 @@ func (srv *notebookServer) Start() {
 			}()
 			srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate}
 			log.Fatal(srv.ListenAndServeTLS("", ""))
-
 		} else {
 			log.Print("using standard tls")
 			log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
