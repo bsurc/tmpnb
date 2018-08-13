@@ -1,6 +1,5 @@
 {
   "asset_path": "./assets",
-  "container_lifetime": "10m",
   "disable_jupyter_auth": false,
   "enable_acme": false,
   "enable_csp": false,
@@ -8,10 +7,8 @@
   "enable_pprof": true,
   "enable_stats": true,
   "github_repo": "bsurc/tmpnb",
-  "image_regexp": ".*",
   "access_logfile": "",
   "logfile": "",
-  "max_containers": 100,
   "rotate_logs": false,
   "http_redirect": false,
   "persistent": false,

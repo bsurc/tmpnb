@@ -8,7 +8,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"encoding/json"
+	"flag"
 	"fmt"
 	"html/template"
 	"io/ioutil"
@@ -57,14 +57,17 @@ type notebookServer struct {
 	pool *notebookPool
 	// token is the generated random auth token
 	token string
+
 	// enableOAuth if the
 	enableOAuth bool
 	// oauthClient is the authenticator for boise state
 	oauthClient *oauth2.Client
+
 	// buildMu guards buildMap
 	buildMu sync.Mutex
 	// buildMap holds names of images currently being built
 	buildMap map[string]struct{}
+
 	// mux routes http traffic
 	mux *ServeMux
 	// embed a server
@@ -73,57 +76,49 @@ type notebookServer struct {
 	templates *template.Template
 
 	//Configuration options for the server
-	AssetPath          string `json:"asset_path"`
-	ContainerLifetime  string `json:"container_lifetime"`
-	DisableJupyterAuth bool   `json:"disable_jupyter_auth"`
-	EnablePProf        bool   `json:"enable_pprof"`
-	EnableStats        bool   `json:"enable_stats"`
-	ImageRegexp        string `json:"image_regexp"`
-	MaxContainers      int    `json:"max_containers"`
-	Persistant         bool   `json:"persistent"`
-	Port               string `json:"port"`
-	Host               string `json:"host"`
-	HTTPRedirect       bool   `json:"http_redirect"`
-	EnableACME         bool   `json:"enable_acme"`
-	TLSCert            string `json:"tls_cert"`
-	TLSKey             string `json:"tls_key"`
+	AssetPath          string
+	ContainerLifetime  time.Duration
+	DisableJupyterAuth bool
+	EnablePProf        bool
+	EnableStats        bool
+	ImageRegexp        string
+	MaxContainers      int
+	Persistant         bool
+	Port               string
+	Host               string
+	HTTPRedirect       bool
+	EnableACME         bool
+	TLSCert            string
+	TLSKey             string
 	OAuthConfig        struct {
-		WhiteList []string `json:"whitelist"`
-		RegExp    string   `json:"match"`
-	} `json:"oauth_confg"`
+		WhiteList []string
+		RegExp    string
+	}
 }
 
 // newNotebookServer initializes a server and owned resources, using a
 // configuration if supplied.
-func newNotebookServer(config string) (*notebookServer, error) {
-	srv := &notebookServer{
-		ContainerLifetime: "10m",
-		ImageRegexp:       allImageMatch,
-		MaxContainers:     defaultMaxContainers,
-	}
-	if config != "" {
-		fin, err := os.Open(config)
-		if err != nil {
-			return nil, err
-		}
-		err = json.NewDecoder(fin).Decode(srv)
-		fin.Close()
-		if err != nil {
-			return nil, err
-		}
-	}
+func main() {
+	srv := &notebookServer{}
+	flag.StringVar(&srv.AssetPath, "assets", "./assets", "asset directory")
+	flag.StringVar(&srv.Port, "port", ":8888", "address to listen on (:8888)")
+
+	flag.BoolVar(&srv.EnableStats, "stats", false, "enable /stats endpoint")
+
+	flag.DurationVar(&srv.ContainerLifetime, "lifetime", 10*time.Minute, "idle container lifetime")
+	flag.StringVar(&srv.ImageRegexp, "imageregexp", allImageMatch, "allowed image regexp")
+	flag.IntVar(&srv.MaxContainers, "maxcontainers", defaultMaxContainers, "maximum live containers")
+
+	flag.Parse()
+
 	var err error
 	// Disallow http -> https redirect if not using standard ports
 	if srv.HTTPRedirect && srv.Port != "" {
-		return nil, fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port)
+		log.Fatal(fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port))
 	}
-	lifetime, err := time.ParseDuration(srv.ContainerLifetime)
+	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, srv.ContainerLifetime, srv.Persistant)
 	if err != nil {
-		return nil, err
-	}
-	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, lifetime, srv.Persistant)
-	if err != nil {
-		return nil, err
+		log.Fatal(err)
 	}
 	tkn := newKey(defaultKeySize)
 	srv.pool = p
@@ -138,7 +133,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.pool.disableJupyterAuth = srv.DisableJupyterAuth
 	srv.enableOAuth = srv.OAuthConfig.RegExp != "" || len(srv.OAuthConfig.WhiteList) > 0
 	if !srv.enableOAuth && srv.Persistant {
-		return nil, fmt.Errorf("OAuth must be enabled in persistent mode")
+		log.Fatal("OAuth must be enabled in persistent mode")
 	}
 	if srv.enableOAuth {
 		token := misc.ReadOrPanic(filepath.Join(srv.AssetPath, "token"))
@@ -176,7 +171,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			CookieName:  "bsuJupyter",
 		})
 		if err != nil {
-			return nil, err
+			log.Fatal(err)
 		}
 		srv.oauthClient.CI = true
 		for _, s := range srv.OAuthConfig.WhiteList {
@@ -214,7 +209,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 	templateFiles, err := filepath.Glob(filepath.Join(srv.AssetPath, "templates", "*.html"))
 	if err != nil {
-		return nil, err
+		log.Fatal(err)
 	}
 	var templatePaths []string
 	for _, t := range templateFiles {
@@ -244,7 +239,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 			}
 		}
 	}()
-	return srv, nil
+	srv.Start()
 }
 
 func memInfo() (total, free, avail uint64) {
@@ -658,16 +653,4 @@ func (srv *notebookServer) Start() {
 	} else {
 		log.Fatal(srv.ListenAndServe())
 	}
-}
-
-func main() {
-	cfg := ""
-	if len(os.Args) > 1 {
-		cfg = os.Args[1]
-	}
-	srv, err := newNotebookServer(cfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-	srv.Start()
 }
