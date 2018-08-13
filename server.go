@@ -5,9 +5,7 @@
 package main
 
 import (
-	"archive/tar"
 	"bufio"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/tls"
@@ -103,8 +101,6 @@ type notebookServer struct {
 	sessionMu sync.Mutex
 	// sessions holds cookie keys and user emails
 	sessions map[string]*session
-	// enableDockerPush listens for container updates
-	enableDockerPush bool
 	// enableOAuth if the
 	enableOAuth bool
 	// oauthConf is the OAuth2 client configuration
@@ -123,8 +119,6 @@ type notebookServer struct {
 	buildMu sync.Mutex
 	// buildMap holds names of images currently being built
 	buildMap map[string]struct{}
-	// githubToken holds the github secret for the push event
-	githubToken string
 	// redirectLock locks the redirectMap
 	redirectMu sync.Mutex
 	// redirectMap handles initial incoming requests before the user is
@@ -151,23 +145,20 @@ type notebookServer struct {
 	ContainerLifetime  string `json:"container_lifetime"`
 	DisableJupyterAuth bool   `json:"disable_jupyter_auth"`
 	EnableCSP          bool   `json:"enable_csp"`
-	EnableDockerPush   bool   `json:"enable_docker_push"`
-	// Github repository name (bsurc/tmpnb)
-	GithubRepo    string `json:"github_repo"`
-	EnablePProf   bool   `json:"enable_pprof"`
-	EnableStats   bool   `json:"enable_stats"`
-	ImageRegexp   string `json:"image_regexp"`
-	MaxContainers int    `json:"max_containers"`
-	Logfile       string `json:"logfile"`
-	Persistant    bool   `json:"persistent"`
-	Port          string `json:"port"`
-	RotateLogs    bool   `json:"rotate_logs"`
-	Host          string `json:"host"`
-	HTTPRedirect  bool   `json:"http_redirect"`
-	EnableACME    bool   `json:"enable_acme"`
-	TLSCert       string `json:"tls_cert"`
-	TLSKey        string `json:"tls_key"`
-	OAuthConfig   struct {
+	EnablePProf        bool   `json:"enable_pprof"`
+	EnableStats        bool   `json:"enable_stats"`
+	ImageRegexp        string `json:"image_regexp"`
+	MaxContainers      int    `json:"max_containers"`
+	Logfile            string `json:"logfile"`
+	Persistant         bool   `json:"persistent"`
+	Port               string `json:"port"`
+	RotateLogs         bool   `json:"rotate_logs"`
+	Host               string `json:"host"`
+	HTTPRedirect       bool   `json:"http_redirect"`
+	EnableACME         bool   `json:"enable_acme"`
+	TLSCert            string `json:"tls_cert"`
+	TLSKey             string `json:"tls_key"`
+	OAuthConfig        struct {
 		WhiteList []string `json:"whitelist"`
 		RegExp    string   `json:"match"`
 	} `json:"oauth_confg"`
@@ -352,9 +343,6 @@ func newNotebookServer(config string) (*notebookServer, error) {
 
 	log.Print("OAuth2 regexp:", srv.OAuthConfig.RegExp)
 
-	// Docker push support
-	srv.enableDockerPush = srv.EnableDockerPush
-
 	// Use the internal mux, it has deregister
 	srv.mux = new(ServeMux)
 	// handle '/' explicitly.  If the path isn't exactly '/', the handler issues
@@ -362,8 +350,6 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.rootHandler)))
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
 	srv.mux.HandleFunc("/auth", srv.oauthHandler)
-	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
-	srv.mux.Handle("/github/push/", http.HandlerFunc(srv.githubPushHandler))
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
@@ -897,214 +883,6 @@ func (srv *notebookServer) privacyHandler(w http.ResponseWriter, r *http.Request
 		log.Print(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-}
-
-func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Request) {
-	if srv.GithubRepo == "" {
-		// If the updating from Github is disabled, just tell Github to go away
-		// nicely.
-		w.WriteHeader(http.StatusOK)
-	}
-
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	// ping okay
-	if r.Header.Get("X-GitHub-Event") == "ping" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	if r.Header.Get("Content-Type") != "application/json" ||
-		r.Header.Get("X-GitHub-Event") != "push" ||
-		!strings.HasPrefix(r.UserAgent(), "GitHub-Hookshot/") {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	var push githubPush
-	err := json.NewDecoder(r.Body).Decode(&push)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Print(err)
-		return
-	}
-	if push.Repository.FullName != srv.GithubRepo {
-		w.WriteHeader(http.StatusPreconditionFailed)
-		return
-	}
-	// TODO(kyle): check signature/secret/HMAC
-
-	// If any of the docker/$PI_NAME/Dockerfile has changes, download the file
-	// from master, run docker build.
-	var build []string
-	var remove []string
-	for _, commit := range push.Commits {
-		allChanges := append(commit.Added, commit.Modified...)
-		for _, file := range allChanges {
-			if strings.HasSuffix(file, "Dockerfile") {
-				build = append(build, file)
-			}
-		}
-		for _, file := range commit.Removed {
-			if strings.HasSuffix(file, "Dockerfile") {
-				remove = append(remove, file)
-			}
-		}
-	}
-	if build == nil && remove == nil {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	// TODO(kyle): should we remove the dropped files?  This would 'mirror' the
-	// repo more consistently.
-	for _, r := range remove {
-		_ = r
-		/*
-			ctx := context.Background()
-			cli, err := client.NewEnvClient()
-			resp, err := cli.ImageRemove(ctx, imageID string, options types.ImageRemoveOptions)
-			srv.pool.Lock()
-			delete(srv.pool.availableImages[tag])
-			srv.pool.Unlock()
-		*/
-	}
-
-	// Write OK early, let us do work in the background.  Github doesn't need to
-	// know any errors we encounter when building the images.
-	w.WriteHeader(http.StatusOK)
-
-	for _, d := range build {
-		// TODO(kyle): look at granularity here.  Probably move the goroutine up
-		// and let it chug one at a time.  If there was a blanket update of all
-		// containers or a lot added at once, it would be bad.
-		dockerfile := d
-		go func() {
-			u := url.URL{
-				Scheme: "https",
-				Host:   "github.com",
-				// FIXME(kyle): branch may not be master or xxx
-				Path: filepath.Join("/bsurc/tmpnb/raw/", "git-push", dockerfile),
-			}
-			resp, err := http.Get(u.String())
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				log.Print(err)
-				return
-			}
-			body, err := ioutil.ReadAll(resp.Body)
-			resp.Body.Close()
-			if err != nil {
-				log.Print(err)
-				return
-			}
-			buf := &bytes.Buffer{}
-			tw := tar.NewWriter(buf)
-			h := &tar.Header{
-				Name:     "Dockerfile",
-				Size:     int64(len(body)),
-				Typeflag: tar.TypeReg,
-			}
-			tw.WriteHeader(h)
-			_, err = tw.Write(body)
-			if err != nil {
-				log.Print(err)
-				return
-			}
-			err = tw.Close()
-			if err != nil {
-				log.Print(err)
-				return
-			}
-			tag := "boisestate/" + strings.Split(dockerfile, "/")[1] + "-notebook:latest"
-			srv.buildMu.Lock()
-			srv.buildMap[tag] = struct{}{}
-			srv.buildMu.Unlock()
-			cli, err := client.NewEnvClient()
-			if err != nil {
-				log.Print(err)
-				return
-			}
-			ctx := context.Background()
-			buildResp, err := cli.ImageBuild(ctx, buf, types.ImageBuildOptions{
-				Tags:           []string{tag},
-				Context:        buf,
-				SuppressOutput: true,
-				PullParent:     true,
-				//BuildArgs   map[string]*string
-				//Target      string
-			})
-
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				srv.buildMu.Lock()
-				delete(srv.buildMap, tag)
-				srv.buildMu.Unlock()
-				return
-			}
-			buildResp.Body.Close()
-			srv.buildMu.Lock()
-			delete(srv.buildMap, tag)
-			srv.buildMu.Unlock()
-		}()
-	}
-}
-
-func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Request) {
-	if !srv.enableDockerPush {
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
-		log.Print("invalid /docker/push/ method")
-		return
-	}
-	log.Print("request for docker pull")
-	var push dockerPush
-	if err := json.NewDecoder(r.Body).Decode(&push); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Print(err)
-		return
-	}
-	repo := push.Repository.RepoName + ":" + push.PushData.Tag
-	var update bool
-	srv.pool.Lock()
-	_, update = srv.pool.availableImages[repo]
-	srv.pool.Unlock()
-	if !update {
-		log.Printf("image: %s not on server", repo)
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*20)
-		defer cancel()
-		cli, err := client.NewEnvClient()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer cli.Close()
-		log.Printf("attempting to pull %s", repo)
-		out, err := cli.ImagePull(ctx, repo, types.ImagePullOptions{})
-		if err != nil {
-			log.Printf("pull failed: %s", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer out.Close()
-		s := bufio.NewScanner(out)
-		var ps dockerPullStatus
-		for s.Scan() {
-			err := json.Unmarshal([]byte(s.Text()), &ps)
-			if err != nil {
-				log.Print(err)
-			}
-			log.Print(ps.Progress)
-		}
-	}()
 }
 
 // listImagesHandler lists html links to the different docker images.
