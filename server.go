@@ -86,8 +86,6 @@ type notebookServer struct {
 	Host               string
 	HTTPRedirect       bool
 	EnableACME         bool
-	TLSCert            string
-	TLSKey             string
 	OAuthConfig        struct {
 		WhiteList []string
 		RegExp    string
@@ -99,6 +97,7 @@ type notebookServer struct {
 func main() {
 	srv := &notebookServer{}
 	flag.StringVar(&srv.AssetPath, "assets", "./assets", "asset directory")
+	flag.StringVar(&srv.Host, "host", "127.0.0.1", "host name")
 	flag.StringVar(&srv.Port, "port", ":8888", "address to listen on (:8888)")
 
 	flag.BoolVar(&srv.EnableStats, "stats", false, "enable /stats endpoint")
@@ -106,6 +105,8 @@ func main() {
 	flag.DurationVar(&srv.ContainerLifetime, "lifetime", 10*time.Minute, "idle container lifetime")
 	flag.StringVar(&srv.ImageRegexp, "imageregexp", allImageMatch, "allowed image regexp")
 	flag.IntVar(&srv.MaxContainers, "maxcontainers", defaultMaxContainers, "maximum live containers")
+
+	flag.StringVar(&srv.OAuthConfig.RegExp, "oauthregexp", "bsu", "oauth regular expression")
 
 	flag.Parse()
 
@@ -145,7 +146,7 @@ func main() {
 			Path:   "/auth",
 		}
 		// switch to http if not cert/key provided
-		if (srv.TLSCert == "" || srv.TLSKey == "") && !srv.EnableACME {
+		if !srv.EnableACME {
 			rdu.Scheme = "http"
 		}
 		if srv.Port != "" {
@@ -234,7 +235,21 @@ func main() {
 			}
 		}
 	}()
-	srv.Start()
+	if srv.EnableACME {
+		log.Print("using acme via letsencrypt")
+		m := &autocert.Manager{
+			Cache:      autocert.DirCache("/opt/acme/"),
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(srv.Host),
+		}
+		go func() {
+			log.Fatal(http.ListenAndServe(":http", m.HTTPHandler(nil)))
+		}()
+		srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate}
+		log.Fatal(srv.ListenAndServeTLS("", ""))
+	} else {
+		log.Fatal(srv.ListenAndServe())
+	}
 }
 
 func memInfo() (total, free, avail uint64) {
@@ -622,30 +637,4 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 		fmt.Fprintln(w, string(x))
 	}
 	tw.Flush()
-}
-
-// Start starts the http/s listener.
-func (srv *notebookServer) Start() {
-	if (srv.TLSCert != "" && srv.TLSKey != "") || srv.EnableACME {
-		if srv.HTTPRedirect {
-		}
-		if srv.EnableACME {
-			log.Print("using acme via letsencrypt")
-			m := &autocert.Manager{
-				Cache:      autocert.DirCache("/opt/acme/"),
-				Prompt:     autocert.AcceptTOS,
-				HostPolicy: autocert.HostWhitelist(srv.Host),
-			}
-			go func() {
-				log.Fatal(http.ListenAndServe(":http", m.HTTPHandler(nil)))
-			}()
-			srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate}
-			log.Fatal(srv.ListenAndServeTLS("", ""))
-		} else {
-			log.Print("using standard tls")
-			log.Fatal(srv.ListenAndServeTLS(srv.TLSCert, srv.TLSKey))
-		}
-	} else {
-		log.Fatal(srv.ListenAndServe())
-	}
 }
