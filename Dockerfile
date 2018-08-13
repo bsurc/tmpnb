@@ -1,10 +1,10 @@
-FROM ubuntu:16.04
+FROM ubuntu:18.04
 
 MAINTAINER Kyle Shannon <kyle@pobox.com>
 
 USER root
 
-#ENV DEBIAN_FRONTEND noninteractive
+ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update
 RUN apt-get install -y \
@@ -22,16 +22,16 @@ RUN add-apt-repository \
 RUN apt-get update
 RUN apt-get install -y docker-ce
 
-RUN curl -o go.tar.gz https://storage.googleapis.com/golang/go1.10beta1.linux-amd64.tar.gz
+RUN curl -o go.tar.gz https://storage.googleapis.com/golang/go1.10.3.linux-amd64.tar.gz
 RUN tar -C /usr/local -xzf go.tar.gz
 RUN rm go.tar.gz
 
 ENV GOPATH=/opt
 ENV PATH=$PATH:/usr/local/go/bin:/opt/bin
 
-RUN go get github.com/bsurc/tmpnb
+RUN go get -u -v github.com/bsurc/tmpnb
 RUN go install github.com/bsurc/tmpnb
 
 EXPOSE 8888
 
-CMD ["godoc", "-http=:8888"]
+CMD ["/opt/bin/tmpnb", "-http=:8888"]
