@@ -5,9 +5,7 @@
 package main
 
 import (
-	"archive/tar"
 	"bufio"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/tls"
@@ -25,7 +23,6 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -34,12 +31,12 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/bsurc/misc"
+	"github.com/bsurc/oauth2"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"golang.org/x/crypto/acme/autocert"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 )
 
 const (
@@ -65,29 +62,6 @@ func init() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
 
-type session struct {
-	sync.Mutex
-	m     map[string]string
-	token *oauth2.Token
-}
-
-func newSession() *session {
-	return &session{m: make(map[string]string), token: nil}
-}
-
-func (s *session) get(key string) string {
-	s.Lock()
-	v := s.m[key]
-	s.Unlock()
-	return v
-}
-
-func (s *session) set(key, val string) {
-	s.Lock()
-	s.m[key] = val
-	s.Unlock()
-}
-
 // notebookServer handles the http tasks for the temporary notebooks.
 //
 // XXX: note that larger configurations in the docker images, many files can be
@@ -99,38 +73,18 @@ type notebookServer struct {
 	pool *notebookPool
 	// token is the generated random auth token
 	token string
-	// sessionLock guards sessions
-	sessionMu sync.Mutex
-	// sessions holds cookie keys and user emails
-	sessions map[string]*session
+
 	// enableDockerPush listens for container updates
 	enableDockerPush bool
+
 	// enableOAuth if the
 	enableOAuth bool
-	// oauthConf is the OAuth2 client configuration
-	oauthConf *oauth2.Config
-	// oauthState is the string passed to the api to validate on return
-	oauthState string
-	// oauthToken is the API token
-	oauthToken string
-	// oauthSecret is the API secret
-	oauthSecret string
-	// oauthDomainRegexp is used to match whitelisted domains
-	oauthMatch *regexp.Regexp
-	// oauthWhiteList is automagically enabled user emails
-	oauthWhiteList map[string]struct{}
+	// oauthClient is the authenticator for boise state
+	oauthClient *oauth2.Client
 	// buildMu guards buildMap
 	buildMu sync.Mutex
 	// buildMap holds names of images currently being built
 	buildMap map[string]struct{}
-	// githubToken holds the github secret for the push event
-	githubToken string
-	// redirectLock locks the redirectMap
-	redirectMu sync.Mutex
-	// redirectMap handles initial incoming requests before the user is
-	// authenticated through OAuth.  The keys are a session type key, the value
-	// is the path and query string of the request.
-	redirectMap map[string]string
 	// mux routes http traffic
 	mux *ServeMux
 	// embed a server
@@ -150,24 +104,20 @@ type notebookServer struct {
 	AssetPath          string `json:"asset_path"`
 	ContainerLifetime  string `json:"container_lifetime"`
 	DisableJupyterAuth bool   `json:"disable_jupyter_auth"`
-	EnableCSP          bool   `json:"enable_csp"`
-	EnableDockerPush   bool   `json:"enable_docker_push"`
-	// Github repository name (bsurc/tmpnb)
-	GithubRepo    string `json:"github_repo"`
-	EnablePProf   bool   `json:"enable_pprof"`
-	EnableStats   bool   `json:"enable_stats"`
-	ImageRegexp   string `json:"image_regexp"`
-	MaxContainers int    `json:"max_containers"`
-	Logfile       string `json:"logfile"`
-	Persistant    bool   `json:"persistent"`
-	Port          string `json:"port"`
-	RotateLogs    bool   `json:"rotate_logs"`
-	Host          string `json:"host"`
-	HTTPRedirect  bool   `json:"http_redirect"`
-	EnableACME    bool   `json:"enable_acme"`
-	TLSCert       string `json:"tls_cert"`
-	TLSKey        string `json:"tls_key"`
-	OAuthConfig   struct {
+	EnablePProf        bool   `json:"enable_pprof"`
+	EnableStats        bool   `json:"enable_stats"`
+	ImageRegexp        string `json:"image_regexp"`
+	MaxContainers      int    `json:"max_containers"`
+	Logfile            string `json:"logfile"`
+	Persistant         bool   `json:"persistent"`
+	Port               string `json:"port"`
+	RotateLogs         bool   `json:"rotate_logs"`
+	Host               string `json:"host"`
+	HTTPRedirect       bool   `json:"http_redirect"`
+	EnableACME         bool   `json:"enable_acme"`
+	TLSCert            string `json:"tls_cert"`
+	TLSKey             string `json:"tls_key"`
+	OAuthConfig        struct {
 		WhiteList []string `json:"whitelist"`
 		RegExp    string   `json:"match"`
 	} `json:"oauth_confg"`
@@ -284,21 +234,8 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		return nil, fmt.Errorf("OAuth must be enabled in persistent mode")
 	}
 	if srv.enableOAuth {
-		// OAuth
-		srv.sessions = map[string]*session{}
-		// FIXME(kyle): errors after we add files
-		apiToken, err := ioutil.ReadFile(filepath.Join(srv.AssetPath, "token"))
-		if err != nil {
-			return nil, err
-		}
-		srv.oauthToken = strings.TrimSpace(string(apiToken))
-		apiSecret, err := ioutil.ReadFile(filepath.Join(srv.AssetPath, "secret"))
-		if err != nil {
-			return nil, err
-		}
-		srv.oauthSecret = strings.TrimSpace(string(apiSecret))
-		// If we don't have a config hostname, try.  This doesn't use our cname, so
-		// the actual server name must be whitelisted in google.
+		token := misc.ReadOrPanic(filepath.Join(srv.AssetPath, "token"))
+		secret := misc.ReadOrPanic(filepath.Join(srv.AssetPath, "secret"))
 		if srv.Host == "" {
 			srv.Host, err = os.Hostname()
 			if err != nil {
@@ -317,43 +254,25 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		if srv.Port != "" {
 			rdu.Host += srv.Port
 		}
-		log.Printf("redirect: %s", rdu.String())
-		srv.oauthConf = &oauth2.Config{
-			ClientID:     srv.oauthToken,
-			ClientSecret: srv.oauthSecret,
-			RedirectURL:  rdu.String(),
-			Scopes: []string{
-				"https://www.googleapis.com/auth/userinfo.email",
-			},
-			Endpoint: google.Endpoint,
+
+		log.Print("rdu", rdu.String())
+		srv.oauthClient, err = oauth2.NewClient(oauth2.Config{
+			Token:       token,
+			Secret:      secret,
+			RedirectURL: rdu.String(),
+			Regexp:      oauth2.BSUEmail,
+			CookieName:  "bsuJupyter",
+		})
+		if err != nil {
+			return nil, err
 		}
-		srv.oauthState = newKey(defaultKeySize)
-		switch srv.OAuthConfig.RegExp {
-		case "bsu":
-			srv.oauthMatch = regexp.MustCompile(bsuRegexp)
-		case "":
-			break
-		default:
-			if srv.oauthMatch, err = regexp.Compile(srv.OAuthConfig.RegExp); err != nil {
-				return nil, err
-			}
+		srv.oauthClient.CI = true
+		for _, s := range srv.OAuthConfig.WhiteList {
+			srv.oauthClient.Grant(s)
 		}
-	}
-	log.Print("OAuth2 whitelist:")
-	srv.oauthWhiteList = map[string]struct{}{}
-	for _, s := range srv.OAuthConfig.WhiteList {
-		srv.oauthWhiteList[s] = struct{}{}
-		log.Print(s)
 	}
 
 	srv.buildMap = map[string]struct{}{}
-
-	srv.redirectMap = map[string]string{}
-
-	log.Print("OAuth2 regexp:", srv.OAuthConfig.RegExp)
-
-	// Docker push support
-	srv.enableDockerPush = srv.EnableDockerPush
 
 	// Use the internal mux, it has deregister
 	srv.mux = new(ServeMux)
@@ -361,9 +280,7 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	// 404.
 	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.rootHandler)))
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
-	srv.mux.HandleFunc("/auth", srv.oauthHandler)
-	srv.mux.HandleFunc("/docker/push/", srv.dockerPushHandler)
-	srv.mux.Handle("/github/push/", http.HandlerFunc(srv.githubPushHandler))
+	srv.mux.HandleFunc("/auth", srv.oauthClient.AuthHandler)
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
@@ -470,73 +387,14 @@ func memInfo() (total, free, avail uint64) {
 
 func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
-		var ok bool
-		var ses *session
 		srv.accessLog.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
-		// Set the CSP headers if enabled
-		if srv.EnableCSP {
-			w.Header().Set(cspKey, csp())
-		}
 		if srv.HTTPRedirect {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
-		if srv.enableOAuth {
-			c, err := r.Cookie(sessionKey)
-			if err == nil {
-				srv.sessionMu.Lock()
-				ses, ok = srv.sessions[c.Value]
-				srv.sessionMu.Unlock()
-			}
-			if !ok || !ses.token.Valid() {
-				u, err := url.Parse(r.RequestURI)
-				if err != nil {
-					// revert to default handling
-					u.Path = "/list"
-					log.Print(err)
-				}
-				// If the request is asking for some specific resource, and the user
-				// isn't authenticated, store the request state and try to redirect
-				// properly after the authentication.
-				// TODO(kyle): we should check the path if it is a book as well, and
-				// not let people without a valid session cookie get to another
-				// person's notebook.
-				switch u.Path {
-				case "/", "/about", "/list", "/privacy", "/stats":
-					break
-				default:
-					key := newKey(defaultKeySize)
-					srv.redirectMu.Lock()
-					srv.redirectMap[key] = r.RequestURI
-					srv.redirectMu.Unlock()
-					const redirectExpire = 60
-					http.SetCookie(w, &http.Cookie{
-						Name:     redirectKey,
-						Value:    key,
-						MaxAge:   redirectExpire,
-						HttpOnly: true,
-					})
-
-					// Delete the key after 2 * redirectExpire.  This ensures that the
-					// map is cleared, even if the key is never used.  We could do it
-					// right after it's used, but if something goes wrong, or the user
-					// doesn't authenticate successfully, it will never be deleted.  The
-					// javascript function that creates the link for the new container
-					// times out after 60 seconds, so the cookie expires after that, then
-					// the map is cleaned up soon after.
-					go func() {
-						<-time.After(redirectExpire * time.Second * 2)
-						srv.redirectMu.Lock()
-						delete(srv.redirectMap, key)
-						log.Printf("redirect map size: %d", len(srv.redirectMap))
-						srv.redirectMu.Unlock()
-					}()
-					log.Printf("setting redirect map %s: %s", key, r.RequestURI)
-				}
-				http.Redirect(w, r, srv.oauthConf.AuthCodeURL(srv.oauthState), http.StatusTemporaryRedirect)
-				return
-			}
-		}
 		h.ServeHTTP(w, r)
+	}
+	if srv.enableOAuth {
+		return srv.oauthClient.ShimHandler(http.HandlerFunc(f))
 	}
 	return http.HandlerFunc(f)
 }
@@ -548,85 +406,6 @@ func (srv *notebookServer) cspReportHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	log.Print(string(body))
-}
-
-func (srv *notebookServer) oauthHandler(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseForm()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	tok, err := srv.oauthConf.Exchange(oauth2.NoContext, r.FormValue("code"))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	client := srv.oauthConf.Client(oauth2.NoContext, tok)
-	resp, err := client.Get("https://www.googleapis.com/oauth2/v3/userinfo")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer resp.Body.Close()
-
-	type oauthUser struct {
-		Sub           string `json:"sub"`
-		Email         string `json:"email"`
-		EmailVerified bool   `json:"email_verified"`
-		Domain        string `json:"hd"`
-	}
-
-	var u oauthUser
-	err = json.NewDecoder(resp.Body).Decode(&u)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	_, white := srv.oauthWhiteList[u.Email]
-	if white {
-		log.Printf("%s is whitelisted", u.Email)
-	} else {
-		log.Printf("%s is not whitelisted", u.Email)
-	}
-
-	matched := srv.oauthMatch != nil && srv.oauthMatch.MatchString(u.Email)
-	if matched {
-		log.Printf("%s is regexp match", u.Email)
-	} else {
-		log.Printf("%s is not regexp match", u.Email)
-	}
-
-	if !white && !matched {
-		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-		return
-	}
-	key := newKey(defaultKeySize)
-	srv.sessionMu.Lock()
-	srv.sessions[key] = newSession()
-	srv.sessions[key].token = tok
-	srv.sessions[key].set("sub", u.Sub)
-	srv.sessions[key].set("email", u.Email)
-	srv.sessionMu.Unlock()
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionKey,
-		Value:    key,
-		MaxAge:   2419200,
-		HttpOnly: true,
-	})
-	c, err := r.Cookie(redirectKey)
-	if err != nil {
-		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-		return
-	}
-	srv.redirectMu.Lock()
-	uri, ok := srv.redirectMap[c.Value]
-	srv.redirectMu.Unlock()
-	if !ok {
-		http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-		return
-	}
-	log.Printf("using custom redirect %s", r.RequestURI)
-	http.Redirect(w, r, uri, http.StatusTemporaryRedirect)
 }
 
 // statusHandler checks the status of a single container, returning 200 if it
@@ -741,17 +520,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 
 	email := ""
 	if srv.enableOAuth {
-		c, err := r.Cookie(sessionKey)
-		if err != nil {
-			http.Redirect(w, r, "/list", http.StatusTemporaryRedirect)
-			return
-		}
-		srv.sessionMu.Lock()
-		s := srv.sessions[c.Value]
-		srv.sessionMu.Unlock()
-		if s != nil {
-			email = s.get("email")
-		}
+		email = srv.oauthClient.Email(r)
 	}
 
 	var imageName = r.FormValue("image")
@@ -817,19 +586,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		// email to the email provided by the nb. If they match,
 		// allow access, else redirect them to /list
 		if srv.enableOAuth {
-			email := ""
-			c, err := r.Cookie(sessionKey)
-			if err != nil {
-				log.Printf("invalid cookie")
-				http.Redirect(w, r, "/list", http.StatusUnauthorized)
-				return
-			}
-			srv.sessionMu.Lock()
-			s := srv.sessions[c.Value]
-			srv.sessionMu.Unlock()
-			if s != nil {
-				email = s.get("email")
-			}
+			email := srv.oauthClient.Email(r)
 			if email != nb.email {
 				http.Redirect(w, r, "/list", http.StatusUnauthorized)
 				return
@@ -897,214 +654,6 @@ func (srv *notebookServer) privacyHandler(w http.ResponseWriter, r *http.Request
 		log.Print(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-}
-
-func (srv *notebookServer) githubPushHandler(w http.ResponseWriter, r *http.Request) {
-	if srv.GithubRepo == "" {
-		// If the updating from Github is disabled, just tell Github to go away
-		// nicely.
-		w.WriteHeader(http.StatusOK)
-	}
-
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	// ping okay
-	if r.Header.Get("X-GitHub-Event") == "ping" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	if r.Header.Get("Content-Type") != "application/json" ||
-		r.Header.Get("X-GitHub-Event") != "push" ||
-		!strings.HasPrefix(r.UserAgent(), "GitHub-Hookshot/") {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	var push githubPush
-	err := json.NewDecoder(r.Body).Decode(&push)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Print(err)
-		return
-	}
-	if push.Repository.FullName != srv.GithubRepo {
-		w.WriteHeader(http.StatusPreconditionFailed)
-		return
-	}
-	// TODO(kyle): check signature/secret/HMAC
-
-	// If any of the docker/$PI_NAME/Dockerfile has changes, download the file
-	// from master, run docker build.
-	var build []string
-	var remove []string
-	for _, commit := range push.Commits {
-		allChanges := append(commit.Added, commit.Modified...)
-		for _, file := range allChanges {
-			if strings.HasSuffix(file, "Dockerfile") {
-				build = append(build, file)
-			}
-		}
-		for _, file := range commit.Removed {
-			if strings.HasSuffix(file, "Dockerfile") {
-				remove = append(remove, file)
-			}
-		}
-	}
-	if build == nil && remove == nil {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	// TODO(kyle): should we remove the dropped files?  This would 'mirror' the
-	// repo more consistently.
-	for _, r := range remove {
-		_ = r
-		/*
-			ctx := context.Background()
-			cli, err := client.NewEnvClient()
-			resp, err := cli.ImageRemove(ctx, imageID string, options types.ImageRemoveOptions)
-			srv.pool.Lock()
-			delete(srv.pool.availableImages[tag])
-			srv.pool.Unlock()
-		*/
-	}
-
-	// Write OK early, let us do work in the background.  Github doesn't need to
-	// know any errors we encounter when building the images.
-	w.WriteHeader(http.StatusOK)
-
-	for _, d := range build {
-		// TODO(kyle): look at granularity here.  Probably move the goroutine up
-		// and let it chug one at a time.  If there was a blanket update of all
-		// containers or a lot added at once, it would be bad.
-		dockerfile := d
-		go func() {
-			u := url.URL{
-				Scheme: "https",
-				Host:   "github.com",
-				// FIXME(kyle): branch may not be master or xxx
-				Path: filepath.Join("/bsurc/tmpnb/raw/", "git-push", dockerfile),
-			}
-			resp, err := http.Get(u.String())
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				log.Print(err)
-				return
-			}
-			body, err := ioutil.ReadAll(resp.Body)
-			resp.Body.Close()
-			if err != nil {
-				log.Print(err)
-				return
-			}
-			buf := &bytes.Buffer{}
-			tw := tar.NewWriter(buf)
-			h := &tar.Header{
-				Name:     "Dockerfile",
-				Size:     int64(len(body)),
-				Typeflag: tar.TypeReg,
-			}
-			tw.WriteHeader(h)
-			_, err = tw.Write(body)
-			if err != nil {
-				log.Print(err)
-				return
-			}
-			err = tw.Close()
-			if err != nil {
-				log.Print(err)
-				return
-			}
-			tag := "boisestate/" + strings.Split(dockerfile, "/")[1] + "-notebook:latest"
-			srv.buildMu.Lock()
-			srv.buildMap[tag] = struct{}{}
-			srv.buildMu.Unlock()
-			cli, err := client.NewEnvClient()
-			if err != nil {
-				log.Print(err)
-				return
-			}
-			ctx := context.Background()
-			buildResp, err := cli.ImageBuild(ctx, buf, types.ImageBuildOptions{
-				Tags:           []string{tag},
-				Context:        buf,
-				SuppressOutput: true,
-				PullParent:     true,
-				//BuildArgs   map[string]*string
-				//Target      string
-			})
-
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				srv.buildMu.Lock()
-				delete(srv.buildMap, tag)
-				srv.buildMu.Unlock()
-				return
-			}
-			buildResp.Body.Close()
-			srv.buildMu.Lock()
-			delete(srv.buildMap, tag)
-			srv.buildMu.Unlock()
-		}()
-	}
-}
-
-func (srv *notebookServer) dockerPushHandler(w http.ResponseWriter, r *http.Request) {
-	if !srv.enableDockerPush {
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
-		log.Print("invalid /docker/push/ method")
-		return
-	}
-	log.Print("request for docker pull")
-	var push dockerPush
-	if err := json.NewDecoder(r.Body).Decode(&push); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Print(err)
-		return
-	}
-	repo := push.Repository.RepoName + ":" + push.PushData.Tag
-	var update bool
-	srv.pool.Lock()
-	_, update = srv.pool.availableImages[repo]
-	srv.pool.Unlock()
-	if !update {
-		log.Printf("image: %s not on server", repo)
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*20)
-		defer cancel()
-		cli, err := client.NewEnvClient()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer cli.Close()
-		log.Printf("attempting to pull %s", repo)
-		out, err := cli.ImagePull(ctx, repo, types.ImagePullOptions{})
-		if err != nil {
-			log.Printf("pull failed: %s", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer out.Close()
-		s := bufio.NewScanner(out)
-		var ps dockerPullStatus
-		for s.Scan() {
-			err := json.Unmarshal([]byte(s.Text()), &ps)
-			if err != nil {
-				log.Print(err)
-			}
-			log.Print(ps.Progress)
-		}
-	}()
 }
 
 // listImagesHandler lists html links to the different docker images.
