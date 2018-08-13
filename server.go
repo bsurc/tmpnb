@@ -42,18 +42,6 @@ import (
 const (
 	// defaultNotebook is used if the request doesn't specify a docker image.
 	defaultNotebook = "jupyter/minimal-notebook"
-	// sessionKey is the cookie name for session managment
-	sessionKey = "sessionKey"
-	// redirectKey holds some context on login/oauth
-	redirectKey = "redirectFrom"
-	// bsuDefaultRegexp is a regular expression allowing all u.boisestate.edu and
-	// boisestate.edu users login.  As far as we know, BSU doesn't allow symbols
-	// in emails, but we may have to add:
-	//
-	// !#$%&'*+-/=?^_`{|}~
-	//
-	// in the future.  See RFC 5322 (https://tools.ietf.org/html/rfc5322).
-	bsuRegexp = `^.+@(u\.)?boisestate.edu$`
 )
 
 func init() {
@@ -250,11 +238,16 @@ func newNotebookServer(config string) (*notebookServer, error) {
 		}
 
 		log.Print("rdu", rdu.String())
+
+		if srv.OAuthConfig.RegExp == "bsu" {
+			srv.OAuthConfig.RegExp = oauth2.BSUEmail
+		}
+
 		srv.oauthClient, err = oauth2.NewClient(oauth2.Config{
 			Token:       token,
 			Secret:      secret,
 			RedirectURL: rdu.String(),
-			Regexp:      oauth2.BSUEmail,
+			Regexp:      srv.OAuthConfig.RegExp,
 			CookieName:  "bsuJupyter",
 		})
 		if err != nil {
