@@ -55,8 +55,6 @@ func init() {
 type notebookServer struct {
 	// pool manages the containers
 	pool *notebookPool
-	// token is the generated random auth token
-	token string
 
 	// enableOAuth if the
 	enableOAuth bool
@@ -116,14 +114,11 @@ func main() {
 	if srv.HTTPRedirect && srv.Port != "" {
 		log.Fatal(fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port))
 	}
-	p, err := newNotebookPool(srv.ImageRegexp, srv.MaxContainers, srv.ContainerLifetime, srv.Persistant)
+	srv.pool, err = newNotebookPool(srv.ImageRegexp, srv.MaxContainers, srv.ContainerLifetime, srv.Persistant)
 	if err != nil {
 		log.Fatal(err)
 	}
-	tkn := newKey(defaultKeySize)
-	srv.pool = p
-	srv.token = tkn
-	srv.pool.token = tkn
+	srv.pool.token = newKey(defaultKeySize)
 	srv.Server = &http.Server{
 		Addr:         srv.Port,
 		ReadTimeout:  5 * time.Second,
@@ -495,7 +490,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		log.Printf("forwarding path: %s", handlerURL.Path)
 	}
 	q := url.Values{}
-	q.Set("token", srv.token)
+	q.Set("token", srv.pool.token)
 	handlerURL.RawQuery = q.Encode()
 	srv.templates.ExecuteTemplate(w, "new", struct {
 		ID    string
@@ -504,7 +499,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	}{
 		ID:    nb.id,
 		Path:  handlerURL.Path,
-		Token: srv.token,
+		Token: srv.pool.token,
 	})
 }
 
