@@ -84,7 +84,6 @@ type notebookServer struct {
 	Persistant         bool
 	Port               string
 	Host               string
-	HTTPRedirect       bool
 	EnableACME         bool
 	OAuthConfig        struct {
 		WhiteList []string
@@ -111,10 +110,6 @@ func main() {
 	flag.Parse()
 
 	var err error
-	// Disallow http -> https redirect if not using standard ports
-	if srv.HTTPRedirect && srv.Port != "" {
-		log.Fatal(fmt.Errorf("cannot set http redirect with non-standard port: %s", srv.Port))
-	}
 	srv.pool, err = newNotebookPool(srv.ImageRegexp, srv.MaxContainers, srv.ContainerLifetime, srv.Persistant)
 	if err != nil {
 		log.Fatal(err)
@@ -287,7 +282,8 @@ func memInfo() (total, free, avail uint64) {
 func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ACCESS: %s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
-		if srv.HTTPRedirect {
+		switch srv.Port {
+		case ":https", ":443":
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 		h.ServeHTTP(w, r)
