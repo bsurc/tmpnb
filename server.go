@@ -73,10 +73,6 @@ type notebookServer struct {
 	pool *notebookPool
 	// token is the generated random auth token
 	token string
-
-	// enableDockerPush listens for container updates
-	enableDockerPush bool
-
 	// enableOAuth if the
 	enableOAuth bool
 	// oauthClient is the authenticator for boise state
@@ -284,7 +280,6 @@ func newNotebookServer(config string) (*notebookServer, error) {
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
-	srv.mux.Handle("/csp_report", http.HandlerFunc(srv.cspReportHandler))
 	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(srv.AssetPath))))
 	srv.mux.Handle("/stats", srv.accessLogHandler(http.HandlerFunc(srv.statsHandler)))
 	srv.mux.Handle("/status", srv.accessLogHandler(http.HandlerFunc(srv.statusHandler)))
@@ -397,15 +392,6 @@ func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 		return srv.oauthClient.ShimHandler(http.HandlerFunc(f))
 	}
 	return http.HandlerFunc(f)
-}
-
-func (srv *notebookServer) cspReportHandler(w http.ResponseWriter, r *http.Request) {
-	body, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Print(err)
-		return
-	}
-	log.Print(string(body))
 }
 
 // statusHandler checks the status of a single container, returning 200 if it
