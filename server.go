@@ -198,17 +198,7 @@ func main() {
 
 	srv.Handler = srv.mux
 
-	templateFiles, err := filepath.Glob(filepath.Join(srv.AssetPath, "templates", "*.html"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	var templatePaths []string
-	for _, t := range templateFiles {
-		log.Printf("loading template: %s", t)
-		templatePaths = append(templatePaths, t)
-	}
-
-	srv.templates = template.Must(template.New("").ParseFiles(templatePaths...))
+	srv.templates = template.Must(template.ParseGlob(filepath.Join(srv.AssetPath, "templates", "*.html")))
 
 	quit := make(chan os.Signal)
 	signal.Notify(quit, os.Interrupt)
