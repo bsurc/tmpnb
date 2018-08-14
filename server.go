@@ -90,11 +90,11 @@ type notebookServer struct {
 	enableOAuth bool
 	// oauthClient is the authenticator for boise state
 	oauthClient *oauth2.Client
-	//
-	OAuthConfig struct {
-		WhiteList []string
-		RegExp    string
-	}
+	// oauthWhitelist holds specific entries for access by email
+	oauthWhitelist map[string]struct{}
+	// oauthRegexp specifies a match for email entries granted access, 'bsu' may
+	// be used for Boise State u and non-u emails.
+	oauthRegexp string
 
 	// buildMu guards buildMap
 	buildMu sync.Mutex
@@ -106,6 +106,7 @@ type notebookServer struct {
 // newNotebookServer initializes a server and owned resources, using a
 // configuration if supplied.
 func main() {
+	var whitelist string // whitelist comma separated list
 	srv := &notebookServer{}
 	flag.StringVar(&srv.assetPath, "assets", "./assets", "asset directory")
 	flag.StringVar(&srv.host, "host", "127.0.0.1", "host name")
@@ -116,7 +117,8 @@ func main() {
 	flag.StringVar(&srv.imageRegexp, "imageregexp", allImageMatch, "allowed image regexp")
 	flag.IntVar(&srv.maxContainers, "maxcontainers", defaultMaxContainers, "maximum live containers")
 
-	flag.StringVar(&srv.OAuthConfig.RegExp, "oauthregexp", "bsu", "oauth regular expression")
+	flag.StringVar(&whitelist, "oauthwhite", "", "oauth whitelist exceptions")
+	flag.StringVar(&srv.oauthRegexp, "oauthregexp", "bsu", "oauth regular expression")
 
 	flag.Parse()
 
@@ -133,7 +135,16 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 	srv.pool.disableJupyterAuth = !srv.enableJupyterAuth
-	srv.enableOAuth = srv.OAuthConfig.RegExp != "" || len(srv.OAuthConfig.WhiteList) > 0
+
+	// Parse the whitelist for oauth
+	srv.oauthWhitelist = map[string]struct{}{}
+	if whitelist != "" {
+		for _, w := range strings.Split(whitelist, ",") {
+			srv.oauthWhitelist[w] = struct{}{}
+		}
+	}
+
+	srv.enableOAuth = srv.oauthRegexp != "" || len(srv.oauthWhitelist) > 0
 	if !srv.enableOAuth && srv.persistent {
 		log.Fatal("OAuth must be enabled in persistent mode")
 	}
@@ -161,23 +172,23 @@ func main() {
 
 		log.Print("rdu", rdu.String())
 
-		if srv.OAuthConfig.RegExp == "bsu" {
-			srv.OAuthConfig.RegExp = oauth2.BSUEmail
+		if srv.oauthRegexp == "bsu" {
+			srv.oauthRegexp = oauth2.BSUEmail
 		}
 
 		srv.oauthClient, err = oauth2.NewClient(oauth2.Config{
 			Token:       token,
 			Secret:      secret,
 			RedirectURL: rdu.String(),
-			Regexp:      srv.OAuthConfig.RegExp,
+			Regexp:      srv.oauthRegexp,
 			CookieName:  "bsuJupyter",
 		})
 		if err != nil {
 			log.Fatal(err)
 		}
 		srv.oauthClient.CI = true
-		for _, s := range srv.OAuthConfig.WhiteList {
-			srv.oauthClient.Grant(s)
+		for k := range srv.oauthWhitelist {
+			srv.oauthClient.Grant(k)
 		}
 	}
 
