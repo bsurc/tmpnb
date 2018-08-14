@@ -53,99 +53,110 @@ func init() {
 // server with ~60 open notebooks, ~20K files were opened.  Setting the limit
 // on the order of 1<<18 should be enough, I hope.
 type notebookServer struct {
+	// addr is the http address to listen on, such as :8888, :https, :8443, etc
+	addr string
+	// host is the system hostname for address purposes
+	host string
+	// assetPath is the directory with various templates and tokens
+	assetPath string
+	// enablePProf allows access to the http/pprof endpoints
+	enablePProf bool
+	// enableStats allows access to the /stats endpoint
+	enableStats bool
+	// enableACME enables TLS via letsencrypt
+	enableACME bool
+	// mux routes http traffic, it is a copy of http.ServerMux
+	mux *ServeMux
+	// embedded server
+	*http.Server
+	// html templates
+	templates *template.Template
+
 	// pool manages the containers
 	pool *notebookPool
+	// enableJupyterAuth disables an internal security feature
+	enableJupyterAuth bool
+	// containerLifetime is the time a container is allowed to be idle before
+	// being collected
+	containerLifetime time.Duration
+	// imageRegexp is the match that exposes available docker images
+	imageRegexp string
+	// maxContainers is the maximum number of live containers
+	maxContainers int
+	// persistent
+	persistent bool
 
 	// enableOAuth if the
 	enableOAuth bool
 	// oauthClient is the authenticator for boise state
 	oauthClient *oauth2.Client
+	//
+	OAuthConfig struct {
+		WhiteList []string
+		RegExp    string
+	}
 
 	// buildMu guards buildMap
 	buildMu sync.Mutex
 	// buildMap holds names of images currently being built
 	buildMap map[string]struct{}
-
-	// mux routes http traffic
-	mux *ServeMux
-	// embed a server
-	*http.Server
-	// html templates
-	templates *template.Template
-
 	//Configuration options for the server
-	AssetPath          string
-	ContainerLifetime  time.Duration
-	DisableJupyterAuth bool
-	EnablePProf        bool
-	EnableStats        bool
-	ImageRegexp        string
-	MaxContainers      int
-	Persistant         bool
-	Port               string
-	Host               string
-	EnableACME         bool
-	OAuthConfig        struct {
-		WhiteList []string
-		RegExp    string
-	}
 }
 
 // newNotebookServer initializes a server and owned resources, using a
 // configuration if supplied.
 func main() {
 	srv := &notebookServer{}
-	flag.StringVar(&srv.AssetPath, "assets", "./assets", "asset directory")
-	flag.StringVar(&srv.Host, "host", "127.0.0.1", "host name")
-	flag.StringVar(&srv.Port, "port", ":8888", "address to listen on (:8888)")
+	flag.StringVar(&srv.assetPath, "assets", "./assets", "asset directory")
+	flag.StringVar(&srv.host, "host", "127.0.0.1", "host name")
+	flag.StringVar(&srv.addr, "addr", ":8888", "address to listen on (:8888)")
+	flag.BoolVar(&srv.enableStats, "stats", false, "enable /stats endpoint")
 
-	flag.BoolVar(&srv.EnableStats, "stats", false, "enable /stats endpoint")
-
-	flag.DurationVar(&srv.ContainerLifetime, "lifetime", 10*time.Minute, "idle container lifetime")
-	flag.StringVar(&srv.ImageRegexp, "imageregexp", allImageMatch, "allowed image regexp")
-	flag.IntVar(&srv.MaxContainers, "maxcontainers", defaultMaxContainers, "maximum live containers")
+	flag.DurationVar(&srv.containerLifetime, "lifetime", 10*time.Minute, "idle container lifetime")
+	flag.StringVar(&srv.imageRegexp, "imageregexp", allImageMatch, "allowed image regexp")
+	flag.IntVar(&srv.maxContainers, "maxcontainers", defaultMaxContainers, "maximum live containers")
 
 	flag.StringVar(&srv.OAuthConfig.RegExp, "oauthregexp", "bsu", "oauth regular expression")
 
 	flag.Parse()
 
 	var err error
-	srv.pool, err = newNotebookPool(srv.ImageRegexp, srv.MaxContainers, srv.ContainerLifetime, srv.Persistant)
+	srv.pool, err = newNotebookPool(srv.imageRegexp, srv.maxContainers, srv.containerLifetime, srv.persistent)
 	if err != nil {
 		log.Fatal(err)
 	}
 	srv.pool.token = newKey(defaultKeySize)
 	srv.Server = &http.Server{
-		Addr:         srv.Port,
+		Addr:         srv.addr,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
-	srv.pool.disableJupyterAuth = srv.DisableJupyterAuth
+	srv.pool.disableJupyterAuth = !srv.enableJupyterAuth
 	srv.enableOAuth = srv.OAuthConfig.RegExp != "" || len(srv.OAuthConfig.WhiteList) > 0
-	if !srv.enableOAuth && srv.Persistant {
+	if !srv.enableOAuth && srv.persistent {
 		log.Fatal("OAuth must be enabled in persistent mode")
 	}
 	if srv.enableOAuth {
-		token := misc.ReadOrPanic(filepath.Join(srv.AssetPath, "token"))
-		secret := misc.ReadOrPanic(filepath.Join(srv.AssetPath, "secret"))
-		if srv.Host == "" {
-			srv.Host, err = os.Hostname()
+		token := misc.ReadOrPanic(filepath.Join(srv.assetPath, "token"))
+		secret := misc.ReadOrPanic(filepath.Join(srv.assetPath, "secret"))
+		if srv.host == "" {
+			srv.host, err = os.Hostname()
 			if err != nil {
 				log.Print(err)
 			}
 		}
 		rdu := url.URL{
 			Scheme: "https",
-			Host:   srv.Host,
+			Host:   srv.host,
 			Path:   "/auth",
 		}
 		// switch to http if not cert/key provided
-		if !srv.EnableACME {
+		if !srv.enableACME {
 			rdu.Scheme = "http"
 		}
-		if srv.Port != "" {
-			rdu.Host += srv.Port
+		if srv.addr != "" {
+			rdu.Host += srv.addr
 		}
 
 		log.Print("rdu", rdu.String())
@@ -182,10 +193,10 @@ func main() {
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
-	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(srv.AssetPath))))
+	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(srv.assetPath))))
 	srv.mux.Handle("/stats", srv.accessLogHandler(http.HandlerFunc(srv.statsHandler)))
 	srv.mux.Handle("/status", srv.accessLogHandler(http.HandlerFunc(srv.statusHandler)))
-	if srv.EnablePProf {
+	if srv.enablePProf {
 		srv.mux.Handle("/debug/pprof/", srv.accessLogHandler(http.HandlerFunc(pprof.Index)))
 		srv.mux.Handle("/debug/pprof/cmdline", srv.accessLogHandler(http.HandlerFunc(pprof.Cmdline)))
 		srv.mux.Handle("/debug/pprof/profile", srv.accessLogHandler(http.HandlerFunc(pprof.Profile)))
@@ -198,7 +209,7 @@ func main() {
 
 	srv.Handler = srv.mux
 
-	srv.templates = template.Must(template.ParseGlob(filepath.Join(srv.AssetPath, "templates", "*.html")))
+	srv.templates = template.Must(template.ParseGlob(filepath.Join(srv.assetPath, "templates", "*.html")))
 
 	quit := make(chan os.Signal)
 	signal.Notify(quit, os.Interrupt)
@@ -220,12 +231,12 @@ func main() {
 			}
 		}
 	}()
-	if srv.EnableACME {
+	if srv.enableACME {
 		log.Print("using acme via letsencrypt")
 		m := &autocert.Manager{
 			Cache:      autocert.DirCache("/opt/acme/"),
 			Prompt:     autocert.AcceptTOS,
-			HostPolicy: autocert.HostWhitelist(srv.Host),
+			HostPolicy: autocert.HostWhitelist(srv.host),
 		}
 		go func() {
 			log.Fatal(http.ListenAndServe(":http", m.HTTPHandler(nil)))
@@ -272,7 +283,7 @@ func memInfo() (total, free, avail uint64) {
 func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ACCESS: %s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
-		switch srv.Port {
+		switch srv.addr {
 		case ":https", ":443":
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
@@ -426,7 +437,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if srv.Persistant {
+	if srv.persistent {
 		// If we have a valid notebook, it may already be running in persistent
 		// mode.  Check the mux and see if the path is already registered.  If it
 		// is, just point it to the existing notebook.
@@ -553,7 +564,7 @@ func (srv *notebookServer) listImagesHandler(w http.ResponseWriter, r *http.Requ
 // statsHandler reports statistics for the server.  It apparently leaks file
 // descriptors.  return immediately for now, until we can fix.
 func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) {
-	if !srv.EnableStats {
+	if !srv.enableStats {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
 	}
@@ -570,7 +581,7 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	fmt.Fprintln(w)
 	t := srv.pool.NextCollection()
 	fmt.Fprintf(w, "Next container reclamation: %s (%s)\n", t, t.Sub(time.Now()))
-	fmt.Fprintf(w, "Persistent mode: %t\n", srv.Persistant)
+	fmt.Fprintf(w, "Persistent mode: %t\n", srv.persistent)
 	fmt.Fprintf(w, "Container lifetime: %s\n", srv.pool.containerLifetime)
 	// XXX: these are copies, they are local and we don't need to hold locks when
 	// accessing them.
