@@ -111,11 +111,15 @@ func main() {
 	flag.StringVar(&srv.assetPath, "assets", "./assets", "asset directory")
 	flag.StringVar(&srv.host, "host", "127.0.0.1", "host name")
 	flag.StringVar(&srv.addr, "addr", ":8888", "address to listen on (:8888)")
+	flag.BoolVar(&srv.enablePProf, "pprof", false, "enable http/pprof endpoint")
 	flag.BoolVar(&srv.enableStats, "stats", false, "enable /stats endpoint")
+	flag.BoolVar(&srv.enableACME, "acme", false, "enable TLS via acme (overrides -addr)")
 
 	flag.DurationVar(&srv.containerLifetime, "lifetime", 10*time.Minute, "idle container lifetime")
 	flag.StringVar(&srv.imageRegexp, "imageregexp", allImageMatch, "allowed image regexp")
 	flag.IntVar(&srv.maxContainers, "maxcontainers", defaultMaxContainers, "maximum live containers")
+	flag.BoolVar(&srv.enableJupyterAuth, "nojupyterauth", false, "enable internal auth in jupyter")
+	flag.BoolVar(&srv.persistent, "persist", false, "enable persistent mode (experimental)")
 
 	flag.StringVar(&whitelist, "oauthwhite", "", "oauth whitelist exceptions")
 	flag.StringVar(&srv.oauthRegexp, "oauthregexp", "bsu", "oauth regular expression")
