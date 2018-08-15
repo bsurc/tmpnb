@@ -118,7 +118,7 @@ func main() {
 	flag.DurationVar(&srv.containerLifetime, "lifetime", 10*time.Minute, "idle container lifetime")
 	flag.StringVar(&srv.imageRegexp, "imageregexp", allImageMatch, "allowed image regexp")
 	flag.IntVar(&srv.maxContainers, "maxcontainers", defaultMaxContainers, "maximum live containers")
-	flag.BoolVar(&srv.enableJupyterAuth, "nojupyterauth", false, "enable internal auth in jupyter")
+	flag.BoolVar(&srv.enableJupyterAuth, "jupyterauth", false, "enable internal auth in jupyter")
 	flag.BoolVar(&srv.persistent, "persist", false, "enable persistent mode (experimental)")
 
 	flag.StringVar(&whitelist, "oauthwhite", "", "oauth whitelist exceptions")
@@ -176,7 +176,7 @@ func main() {
 			rdu.Host += srv.addr
 		}
 
-		log.Print("rdu", rdu.String())
+		log.Printf("oauth redirect: %s", rdu.String())
 
 		if srv.oauthRegexp == "bsu" {
 			srv.oauthRegexp = oauth2.BSUEmail
@@ -201,7 +201,7 @@ func main() {
 	srv.buildMap = map[string]struct{}{}
 
 	// Use the internal mux, it has deregister
-	srv.mux = new(ServeMux)
+	srv.mux = &ServeMux{}
 	// handle '/' explicitly.  If the path isn't exactly '/', the handler issues
 	// 404.
 	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.rootHandler)))
