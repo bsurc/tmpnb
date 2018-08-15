@@ -170,7 +170,9 @@ func main() {
 		if !srv.enableACME {
 			rdu.Scheme = "http"
 		}
-		if srv.addr != "" {
+		switch srv.addr {
+		case ":http", ":https", ":80", ":443":
+		default:
 			rdu.Host += srv.addr
 		}
 
