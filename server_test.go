@@ -7,10 +7,12 @@ package main
 import (
 	"regexp"
 	"testing"
+
+	"github.com/bsurc/oauth2"
 )
 
 func TestBSURegexp(t *testing.T) {
-	re := regexp.MustCompile(bsuRegexp)
+	re := regexp.MustCompile(oauth2.BSUEmail)
 	tests := []struct {
 		s     string
 		match bool

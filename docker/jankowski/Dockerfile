@@ -56,4 +56,3 @@ RUN jupyter nbextension enable --py widgetsnbextension --sys-prefix
 ENV XDG_CACHE_HOME /home/$NB_USER/.cache/
 RUN MPLBACKEND=Agg $CONDA_DIR/bin/python -c "import matplotlib.pyplot"
 
-USER $NB_USER

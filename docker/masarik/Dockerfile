@@ -30,4 +30,6 @@ RUN conda install -c conda-forge --quiet --yes \
 
 WORKDIR $HOME
 
+COPY /data/*.gz ./
+
 RUN git clone https://github.com/NCAR/wrf_python_tutorial
