@@ -122,7 +122,7 @@ func main() {
 	flag.BoolVar(&srv.persistent, "persist", false, "enable persistent mode (experimental)")
 
 	flag.StringVar(&whitelist, "oauthwhite", "", "oauth whitelist exceptions")
-	flag.StringVar(&srv.oauthRegexp, "oauthregexp", "bsu", "oauth regular expression")
+	flag.StringVar(&srv.oauthRegexp, "oauthregexp", "", "oauth regular expression(bsu=BSU emails)")
 
 	flag.Parse()
 
