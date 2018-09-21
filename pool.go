@@ -27,7 +27,7 @@ import (
 const (
 	// jupyterNotebookImageMatch matches images from jupyter/docker-stacks, for
 	// example: jupyter/minimal-notebook
-	jupyterNotebookImageMatch = `[a-zA-Z0-9]+/[a-zA-Z0-9]+-notebook(:[a-zA-Z0-9]*)?`
+	jupyterNotebookImageMatch = `[a-zA-Z0-9]+/[a-zA-Z0-9]+-notebook(:[a-zA-Z0-9]+)?$`
 
 	// allImageMatch applies no filter
 	allImageMatch = `.*`

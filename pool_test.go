@@ -29,6 +29,7 @@ func TestImageMatch(t *testing.T) {
 		{"ksshannon/geo-notebook:latest", true},
 		{"ksshannon/geo-notebook:sometag", true},
 		{"ksshannon/notanotebook", false},
+		{"ksshannon/geo-notebook:two:tags", false},
 		{"notanotebook", false},
 		{"notanotebook:invalid", false},
 		{"jupyter/tmpnb:latest", false},
