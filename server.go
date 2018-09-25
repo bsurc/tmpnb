@@ -206,7 +206,6 @@ func main() {
 	// 404.
 	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.rootHandler)))
 	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
-	srv.mux.HandleFunc("/auth", srv.oauthClient.AuthHandler)
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
@@ -218,6 +217,9 @@ func main() {
 		srv.mux.Handle("/debug/pprof/cmdline", srv.accessLogHandler(http.HandlerFunc(pprof.Cmdline)))
 		srv.mux.Handle("/debug/pprof/profile", srv.accessLogHandler(http.HandlerFunc(pprof.Profile)))
 		srv.mux.Handle("/debug/pprof/symbol", srv.accessLogHandler(http.HandlerFunc(pprof.Symbol)))
+	}
+	if srv.enableOAuth {
+		srv.mux.HandleFunc("/auth", srv.oauthClient.AuthHandler)
 	}
 
 	srv.mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, r *http.Request) {
