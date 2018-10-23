@@ -85,6 +85,13 @@ type notebookPool struct {
 	// containerMap is stores the contexts for the containers.
 	containerMap map[string]*notebook
 
+	// allMu guards the allContainer map
+	allMu sync.Mutex
+
+	// allContainers holds all containers spawned by the pool during the lifetime
+	// of the pool.  This can help decide what containers are actually 'zombies'.
+	allContainers map[string]struct{}
+
 	// persisent allows changes to be stored in new docker images for continued
 	// use.
 	persistent bool
@@ -366,6 +373,9 @@ func (p *notebookPool) addNotebook(t *notebook) error {
 		return errNotebookPoolFull
 	}
 	p.containerMap[t.key] = t
+	p.allMu.Lock()
+	p.allContainers[t.key] = struct{}{}
+	p.allMu.Unlock()
 	p.Unlock()
 	return nil
 }
@@ -485,12 +495,17 @@ func (p *notebookPool) zombieContainers() ([]types.Container, error) {
 	if err != nil {
 		return nil, err
 	}
+	p.allMu.Lock()
+	defer p.allMu.Unlock()
 	for _, c := range containers {
 		// If we manage it, leave it be
 		if _, ok := ids[c.ID]; ok {
 			continue
 		}
-		cs = append(cs, c)
+		if _, ok := p.allContainers[c.ID]; ok {
+			cs = append(cs, c)
+			delete(p.allContainers, c.ID)
+		}
 	}
 	return cs, nil
 }
@@ -599,9 +614,10 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 }
 
 // killZombieContainers stops and kills any docker containers that aren't under
-// out supervision.
+// out supervision.  Since they aren't under our supervision, we don't need to
+// guard them while deleting.
 //
-// FIXME(kyle): not currently called at any time, when, why, etc...
+// TODO(kyle): what are actual zombies?  Do we respect image name?
 func (p *notebookPool) killZombieContainers() error {
 	zombies, err := p.zombieContainers()
 	if err != nil {
