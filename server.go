@@ -124,7 +124,14 @@ func main() {
 	flag.StringVar(&whitelist, "oauthwhite", "", "oauth whitelist exceptions")
 	flag.StringVar(&srv.oauthRegexp, "oauthregexp", "", "oauth regular expression(bsu=BSU emails)")
 
+	flagInfo := flag.Bool("info", false, "print general info and exit")
+
 	flag.Parse()
+
+	if *flagInfo {
+		fmt.Printf("GO Version: %s\n", runtime.Version())
+		os.Exit(0)
+	}
 
 	var err error
 	srv.pool, err = newNotebookPool(srv.imageRegexp, srv.maxContainers, srv.containerLifetime, srv.persistent)
