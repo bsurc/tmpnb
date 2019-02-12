@@ -293,6 +293,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 
 	tokenArg := fmt.Sprintf(`--NotebookApp.token="%s"`, p.token)
 	var env []string
+	env = append(env, fmt.Sprintf("TMPNB_ID=%s", key))
 	if p.disableJupyterAuth {
 		tokenArg = fmt.Sprintf(`--NotebookApp.token=""`)
 	} else {
