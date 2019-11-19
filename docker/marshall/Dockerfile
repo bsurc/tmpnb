@@ -10,9 +10,12 @@ USER root
 
 RUN apt update
 RUN apt -y upgrade
-RUN conda update -n base conda
-RUN conda install -y isce2
 
 USER $NB_USER
+
+RUN conda update -n base conda
+RUN conda install -y \
+                  isce2 \
+                  matplotlib
 
 WORKDIR $HOME
