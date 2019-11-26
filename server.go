@@ -112,7 +112,7 @@ func main() {
 	flag.StringVar(&srv.addr, "addr", ":8888", "address to listen on (:8888)")
 	flag.BoolVar(&srv.enablePProf, "pprof", false, "enable http/pprof endpoint")
 	flag.BoolVar(&srv.enableStats, "stats", false, "enable /stats endpoint")
-	flag.BoolVar(&srv.enableACME, "acme", false, "enable TLS via acme (overrides -addr)")
+	flag.BoolVar(&srv.enableACME, "acme", false, "enable TLS via acme")
 
 	flag.DurationVar(&srv.containerLifetime, "lifetime", 10*time.Minute, "idle container lifetime")
 	flag.StringVar(&srv.imageRegexp, "imageregexp", allImageMatch, "allowed image regexp")
@@ -175,6 +175,7 @@ func main() {
 		// switch to http if not cert/key provided
 		if !srv.enableACME {
 			rdu.Scheme = "http"
+			srv.addr = ":https"
 		}
 		switch srv.addr {
 		case ":http", ":https", ":80", ":443":
@@ -258,7 +259,6 @@ func main() {
 	}()
 	if srv.enableACME {
 		log.Print("using acme via letsencrypt")
-		srv.Addr = ":https"
 		m := &autocert.Manager{
 			Cache:      autocert.DirCache("/opt/acme/"),
 			Prompt:     autocert.AcceptTOS,
