@@ -11,7 +11,6 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -650,14 +649,6 @@ func (srv *notebookServer) statsHandler(w http.ResponseWriter, r *http.Request) 
 	for _, z := range zombies {
 		t := time.Unix(z.Created, 0)
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", z.ID[:8], strings.Join(z.Names, ","), z.Image, t)
-	}
-	tw.Flush()
-	// Dump the sock stats
-	pid := os.Getpid()
-	x, err := ioutil.ReadFile(filepath.Join("/proc", fmt.Sprintf("%d", pid), "net", "sockstat"))
-	if err == nil {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, string(x))
 	}
 	tw.Flush()
 }
