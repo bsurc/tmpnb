@@ -9,9 +9,10 @@ MAINTAINER Kyle Shannon <kyle@pobox.com>
 USER root
 
 # libav-tools for matplotlib anim
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends libav-tools && \
-    apt-get clean && \
+RUN apt update && \
+    apt install -y --no-install-recommends ffmpeg && \
+    apt install -y nano && \
+    apt clean && \
     rm -rf /var/lib/apt/lists/*
 
 USER $NB_USER
@@ -22,7 +23,6 @@ USER $NB_USER
 # numpy, scikit-learn, pandas, xarray, and bokeh
 RUN conda install --quiet --yes \
     'xarray' && \
-    conda remove --quiet --yes --force qt pyqt && \
     conda clean -tipsy
 # Activate ipywidgets extension in the environment that runs the notebook server
 RUN jupyter nbextension enable --py widgetsnbextension --sys-prefix

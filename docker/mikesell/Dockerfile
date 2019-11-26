@@ -10,7 +10,7 @@ USER root
 
 # libav-tools for matplotlib anim
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libav-tools && \
+    apt-get install -y --no-install-recommends ffmpeg && \
     apt-get install -y nano && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
