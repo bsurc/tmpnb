@@ -258,15 +258,20 @@ func main() {
 	}()
 	if srv.enableACME {
 		log.Print("using acme via letsencrypt")
+		srv.Addr = ":https"
 		m := &autocert.Manager{
 			Cache:      autocert.DirCache("/opt/acme/"),
 			Prompt:     autocert.AcceptTOS,
 			HostPolicy: autocert.HostWhitelist(srv.host),
 		}
 		go func() {
+			log.Print("starting http redirect server...")
 			log.Fatal(http.ListenAndServe(":http", m.HTTPHandler(nil)))
 		}()
+		log.Print("setting up certificate manager...")
 		srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate}
+		log.Print("certificate manager set up.")
+		log.Print("starting https server...")
 		log.Fatal(srv.ListenAndServeTLS("", ""))
 	} else {
 		log.Fatal(srv.ListenAndServe())
