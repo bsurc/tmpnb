@@ -180,7 +180,6 @@ func main() {
 		// switch to http if not cert/key provided
 		if !srv.enableACME {
 			rdu.Scheme = "http"
-			srv.addr = ":https"
 		}
 		switch srv.addr {
 		case ":http", ":https", ":80", ":443":
