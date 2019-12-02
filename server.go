@@ -150,6 +150,7 @@ func main() {
 	srv.oauthWhitelist = map[string]struct{}{}
 	if whitelist != "" {
 		for _, w := range strings.Split(whitelist, ",") {
+			log.Printf("adding  %s to whitelist", w)
 			srv.oauthWhitelist[w] = struct{}{}
 		}
 	}
@@ -201,6 +202,7 @@ func main() {
 		}
 		srv.oauthClient.CI = true
 		for k := range srv.oauthWhitelist {
+			log.Printf("authorizing %s for oauth...", k)
 			srv.oauthClient.Grant(k)
 		}
 	}
