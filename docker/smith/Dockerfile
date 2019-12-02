@@ -20,9 +20,9 @@ RUN $CONDA_DIR/envs/python2/bin/python -m ipykernel install && \
     $CONDA_DIR/envs/python2/bin/kernda -o -y /usr/local/share/jupyter/kernels/python2/kernel.json
 
 # libav-tools for matplotlib anim
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends libav-tools && \
-    apt-get clean && \
+RUN apt update && \
+    apt install -y --no-install-recommends ffmpeg && \
+    apt clean && \
     rm -rf /var/lib/apt/lists/*
 
 
@@ -32,7 +32,7 @@ USER $NB_USER
 # Install Python 3 packages
 # Remove pyqt and qt pulled in for matplotlib since we're only ever going to
 # use notebook-friendly backends in these images
-RUN conda install --quiet --yes \
+RUN conda install --quiet --yes --channel glotzer \
     'numpy' \
     'scipy' \
     'pandas' \
