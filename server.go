@@ -64,6 +64,8 @@ type notebookServer struct {
 	enableStats bool
 	// enableACME enables TLS via letsencrypt
 	enableACME bool
+	// minTLS is the minimum TLS version to support
+	minTLS int
 	// mux routes http traffic, it is a copy of http.ServerMux
 	mux *ServeMux
 	// embedded server
@@ -122,6 +124,8 @@ func main() {
 
 	flag.StringVar(&whitelist, "oauthwhite", "", "oauth whitelist exceptions")
 	flag.StringVar(&srv.oauthRegexp, "oauthregexp", "", "oauth regular expression(bsu=BSU emails)")
+
+	flag.IntVar(&srv.minTLS, "mintls", 2, "minimum tls version")
 
 	flagInfo := flag.Bool("info", false, "print general info and exit")
 
@@ -272,6 +276,13 @@ func main() {
 		}()
 		log.Print("setting up certificate manager...")
 		srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate}
+		v := uint16(srv.minTLS)
+		switch v {
+		case 0, 1, 2, 3:
+			srv.TLSConfig.MinVersion = v
+		default:
+			log.Fatalf("invalid tls version: %d", srv.minTLS)
+		}
 		log.Print("certificate manager set up.")
 		log.Print("starting https server...")
 		log.Fatal(srv.ListenAndServeTLS("", ""))
