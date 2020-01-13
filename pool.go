@@ -266,6 +266,8 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 		log.Printf("pulling container %s", image)
 		ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 		defer cancel()
+		// canonicalize the image name, see https://github.com/bsurc/tmpnb/issues/10
+		image = "docker.io/" + image
 		out, err := cli.ImagePull(ctx, image, types.ImagePullOptions{})
 		if err != nil {
 			log.Print(err)
@@ -279,8 +281,10 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 			if err != nil {
 				log.Print(err)
 			}
-			log.Print(ps.Progress)
+			// This is gross, but semi-helpful
+			fmt.Printf("%s\r", ps.Progress)
 		}
+		fmt.Println()
 	}
 
 	key := newKey(defaultKeySize)
