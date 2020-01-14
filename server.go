@@ -463,8 +463,6 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	_, pull := r.Form["pull"]
-
 	srv.buildMu.Lock()
 	_, ok := srv.buildMap[imageName]
 	srv.buildMu.Unlock()
@@ -472,7 +470,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		http.Error(w, "image is currently being re-built", http.StatusServiceUnavailable)
 		return
 	}
-	nb, err := srv.pool.newNotebook(imageName, pull, email)
+	nb, err := srv.pool.newNotebook(imageName, email)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		log.Print(err)

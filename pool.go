@@ -5,10 +5,8 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -200,7 +198,7 @@ func newKey(n int) string {
 }
 
 // newNotebook initializes and sets values for a new notebook.
-func (p *notebookPool) newNotebook(image string, pull bool, email string) (*notebook, error) {
+func (p *notebookPool) newNotebook(image string, email string) (*notebook, error) {
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
 	if err != nil {
@@ -261,31 +259,6 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 	}
 
 	log.Printf("creating container from image %s", image)
-
-	if pull && !p.persistent {
-		log.Printf("pulling container %s", image)
-		ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-		defer cancel()
-		// canonicalize the image name, see https://github.com/bsurc/tmpnb/issues/10
-		image = "docker.io/" + image
-		out, err := cli.ImagePull(ctx, image, types.ImagePullOptions{})
-		if err != nil {
-			log.Print(err)
-			return nil, err
-		}
-		defer out.Close()
-		s := bufio.NewScanner(out)
-		var ps dockerPullStatus
-		for s.Scan() {
-			err := json.Unmarshal([]byte(s.Text()), &ps)
-			if err != nil {
-				log.Print(err)
-			}
-			// This is gross, but semi-helpful
-			fmt.Printf("%s\r", ps.Progress)
-		}
-		fmt.Println()
-	}
 
 	key := newKey(defaultKeySize)
 
