@@ -102,6 +102,9 @@ type notebookServer struct {
 	// buildMap holds names of images currently being built
 	buildMap map[string]struct{}
 	//Configuration options for the server
+
+	// pullers are email addresses with access to the pull page and image pull
+	pullers map[string]struct{}
 }
 
 // newNotebookServer initializes a server and owned resources, using a
@@ -128,6 +131,8 @@ func main() {
 	flag.IntVar(&srv.minTLS, "mintls", 2, "minimum tls version")
 
 	flagInfo := flag.Bool("info", false, "print general info and exit")
+
+	flagPullers := flag.String("pull", "", "list of emails with pull access (comma separated)")
 
 	flag.Parse()
 
@@ -212,6 +217,11 @@ func main() {
 
 	srv.buildMap = map[string]struct{}{}
 
+	srv.pullers = map[string]struct{}{}
+	for _, puller := range strings.Split(*flagPullers, ",") {
+		srv.pullers[puller] = struct{}{}
+	}
+
 	// Use the internal mux, it has deregister
 	srv.mux = &ServeMux{}
 	// handle '/' explicitly.  If the path isn't exactly '/', the handler issues
@@ -221,6 +231,7 @@ func main() {
 	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
 	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
 	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
+	srv.mux.Handle("/pull", srv.accessLogHandler(http.HandlerFunc(srv.pullHandler)))
 	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(srv.assetPath))))
 	srv.mux.Handle("/stats", srv.accessLogHandler(http.HandlerFunc(srv.statsHandler)))
 	srv.mux.Handle("/status", srv.accessLogHandler(http.HandlerFunc(srv.statusHandler)))
@@ -555,6 +566,16 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		Path:  handlerURL.Path,
 		Token: srv.pool.token,
 	})
+}
+
+func (srv *notebookServer) pullHandler(w http.ResponseWriter, r *http.Request) {
+	user := srv.oauthClient.Email(r)
+	_, ok := srv.pullers[user]
+	if !ok {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+	err := srv.pool.pull(r.FormValue("image"))
 }
 
 // Handle the root request.  All un-muxed requests come through here, if it

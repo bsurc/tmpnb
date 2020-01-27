@@ -97,6 +97,12 @@ type notebookPool struct {
 	// progress.
 	imageWrite map[string]struct{}
 
+	// pullMu guards the map that holds images currently being pulled
+	pullMu sync.Mutex
+
+	// pulling holds image names that are currently being pulled
+	pulling map[string]struct{}
+
 	// portSet holds free ports
 	portSet *portRange
 
@@ -468,6 +474,38 @@ func (p *notebookPool) activeNotebooks() []notebook {
 	}
 	p.Unlock()
 	return nbs
+}
+
+func (p *notebookPool) pull(image string) error {
+	p.pullMu.Lock()
+	p.pulling[image] = struct{}{}
+	p.pullMu.Unlock()
+	defer func() {
+		p.pullMu.Lock()
+		delete(p.pulling, image)
+		p.pullMu.Unlock()
+	}()
+	log.Printf("pulling container %s", image)
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	// canonicalize the image name, see https://github.com/bsurc/tmpnb/issues/10
+	image = "docker.io/" + image
+	out, err := cli.ImagePull(ctx, image, types.ImagePullOptions{})
+	if err != nil {
+		log.Print(err)
+		return nil, err
+	}
+	defer out.Close()
+	decoder := json.NewDecoder(out)
+	var ps dockerPullStatus
+	for decoder.More() {
+		err := decoder.Decode(&ps)
+		if err != nil {
+			break
+		}
+		fmt.Println(ps)
+	}
+	return nil
 }
 
 // zombieNotebooks queries docker for containers that aren't under our
