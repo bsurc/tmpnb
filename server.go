@@ -526,6 +526,17 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		nb.lastAccessed = time.Now()
 		nb.Unlock()
 		log.Printf("%s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
+
+		// if we are trying to download a notebook, smidge the timeout a little
+		// to give our container enough time to generate the pdf from latex.
+		//
+		// TODO(kyle): validate
+		if dl := r.FormValue("download"); dl == "true" {
+			log.Print("detected download, extending timeout to 30s")
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			r = r.WithContext(ctx)
+			defer cancel()
+		}
 		if isWebsocket(r) {
 			log.Print("proxying to websocket handler")
 			f := websocketProxy(fmt.Sprintf(":%d", nb.port))
