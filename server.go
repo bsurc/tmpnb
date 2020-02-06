@@ -144,8 +144,8 @@ func main() {
 	srv.pool.token = newKey(defaultKeySize)
 	srv.Server = &http.Server{
 		Addr:         srv.addr,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 	srv.pool.disableJupyterAuth = !srv.enableJupyterAuth
