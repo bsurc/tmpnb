@@ -36,7 +36,9 @@ etc.)
 
 `-maxcontainers`: The maximum number of container instances that can be started
 on the server.  All requests for new servers will be denied until a slot opens
-up from a reclaimed container.  ` `-mintls`: The minimum version of TLS to use
+up from a reclaimed container.  
+
+`-mintls`: The minimum version of TLS to use
 for https.
 
 `-oauthregexp`: Enable OAuth2 for use with google addresses.  Emails must match
