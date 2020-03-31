@@ -1,5 +1,4 @@
-# tmpnb
-Jupyter tmpnb server
+# tmpnb Jupyter tmpnb server
 
 ## Boise State Research Computing
 
@@ -9,91 +8,50 @@ Jupyter notebooks and slight variations (see docker/\*/Dockerfile for recipes.
 
 ## Configuration
 
-The server works off of a `json`configuration file that has parameters for
-access and container options.  Below is an annotated example (comments are not
-allowed in the actual configuaration file).
+See `tmpnb -help` for a list of configurations, a detailed description follows.
 
-    {
-      // asset_path specifies the directory for the html templates, static
-      // files, and oauth2 id and secret (named token and secret respectively)
-      "asset_path": "/opt/src/github.com/bsurc/tmpnb/assets",
-      // container_lifetime specifies how long the container should
-      // approximately live after the last access.  The format follows Go's
-      // time.Duration formatting:
-      //
-      // (https://golang.org/pkg/time/#ParseDuration)
-      //
-      // Such as 10m for 10 minutes, 1h for 1 hour, etc.  The largest time unit
-      // is an hour.
-      "container_lifetime": "10m",
-      // disable_jupyter_auth disables a security feature in the notebook
-      // limiting access.  It sometimes causes issues when the
-      // containers/notebooks are started and it asks for a token.  If you
-      // encounter this issue, set this to true.  The server has session
-      // information as well, so this is mostly redundant.
-      "disable_jupyter_auth": false,
-      // enable_acme allows TLS support via letsencrypt.org.
-      "enable_acme": false,
-      // enable_scp should be false (in development)
-      "enable_csp": false,
-      // enable_docker_push should be false (in development)
-      "enable_docker_push": false,
-      // enable_pprof allows introspection via the Go net/http/pprof
-      // profiling (https://golang.org/pkg/net/http/pprof/).  It registers the
-      // endpoints explicitly.
-      "enable_pprof": true,
-      // enable_stats exposes the endpoint /stats with various metrics such
-      // as number of containers, free memory, etc.
-      "enable_stats": true,
-      // github_repo is used for pulling and building images in real time.
-      // Currently unused.
-      "github_repo": "bsurc/tmpnb",
-      // image_regexp specifies what docker images to expose, for example for
-      // BSU jupyter notebooks:
-      //
-      // boisestate/[a-zA-Z0-9]+-notebook
-      //
-      // or similar
-      "image_regexp": ".*",
-      // access_logfile tracks remote access.  "" -> stdout
-      "access_logfile": "",
-      // log_logfile tracks some activity on the server and pool
-      "logfile": "",
-      "max_containers": 100,
-      // rotate_logs specifies whether or not to manually rotate logs (I need
-      // to read up on logrotate)
-      "rotate_logs": false,
-      // http_redirect redirects all http -> https if TLS is used
-      "http_redirect": false,
-      // persistent allows users to leave a notebook and come back later.  The
-      // image is saved.  OAuth2 must be enabled so the image can be tied to a
-      // specific user.
-      "persistent": false,
-      // port is the port to listen on, if port is "", either 80 or 443 is used
-      // depending on HTTP or HTTPS
-      "port": ":8888",
-      // host is used for OAuth callbacks and a handful of redirects.
-      "host": "127.0.0.1",
-      // tls_cert is the TLS certificate path.  Both tls_cert and tls_key is
-      // needed to enable TLS.
-      "tls_cert": "",
-      // tls_key is the TLS certificate path.  Both tls_cert and tls_key is
-      // needed to enable TLS.
-      "tls_key": "",
-      // oauth_config is to enable OAuth2.  Currently only google is OAuth2 is
-      // available.  If other endpoints are needed, please file an issue.
-      "oauth_confg": {
-        // whitelist specifies access for specific emails, such as
-        // kyleshannon@boisestate.edu
-        "whitelist": [
-        ],
-        // match allows a regular expression match such as:
-        // ^.+@u.boisestate.edu
-        // for undergraduate BSU students or 
-        // ^.+@(u\.)?boisestate.edu$
-        //  for any BSU email
-        "match": ""
-      }
-    }
+`-acme`: This uses letsencrypt to create and install certificates for TLS, with
+automatic renewals.
 
+`-addr`: Specifiy the service/port/address to listen on.  :8888 is the default
+for localhost/debugging.
 
+`-assets`: Path to the ./assets folder in this directory.  Keys, templates, and
+other ancillary data are stored there.
+
+`-host`: The name of the host to generate link names.  Links internal to the
+notebook are also generated using this host name.
+
+`-imageregexp`: A regular expression for the image names allowed to be created
+and deployed.
+
+`-info`: Print general info and exit.
+
+`-jupyterauth`: Enable the internal jupyter authentication.
+
+`-lifetime`: Specify the lifetime of the container after the a specific idle
+time.  Durations are specified using Go duration format (10m30s -> ten minutes
+and thirty seconds, 1h30m30s -> one hour, thirty minutes and thirty seconds,
+etc.)
+
+`-maxcontainers`: The maximum number of container instances that can be started
+on the server.  All requests for new servers will be denied until a slot opens
+up from a reclaimed container.  
+
+`-mintls`: The minimum version of TLS to use
+for https.
+
+`-oauthregexp`: Enable OAuth2 for use with google addresses.  Emails must match
+the regexp provided for access.
+
+`-oauthwhite`: Enable OAuth2 and allow only specific google related emails
+access.
+
+`-persist`: Enable persistent data.  This uses OAuth2 identities to write
+containers back to the system before reclaiming the container.  OAuth2 must be
+enabled to match users to specific containers.  This feature is experimental,
+and not guaranteed to work.
+
+`-pprof`: Enable and expose the net/http/pprof handlers for debugging.
+
+`-stats`: Enable the /stats page to inspect live containers and resource usage.
