@@ -216,19 +216,19 @@ func main() {
 	srv.mux = &ServeMux{}
 	// handle '/' explicitly.  If the path isn't exactly '/', the handler issues
 	// 404.
-	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.rootHandler)))
-	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
-	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
-	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
-	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
-	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(srv.assetPath))))
-	srv.mux.Handle("/stats", srv.accessLogHandler(http.HandlerFunc(srv.statsHandler)))
-	srv.mux.Handle("/status", srv.accessLogHandler(http.HandlerFunc(srv.statusHandler)))
+	srv.mux.Handle("/", srv.shim(http.HandlerFunc(srv.rootHandler)))
+	srv.mux.Handle("/about", srv.shim(http.HandlerFunc(srv.aboutHandler)))
+	srv.mux.Handle("/list", srv.shim(http.HandlerFunc(srv.listImagesHandler)))
+	srv.mux.Handle("/new", srv.shim(http.HandlerFunc(srv.newNotebookHandler)))
+	srv.mux.Handle("/privacy", srv.shim(http.HandlerFunc(srv.privacyHandler)))
+	srv.mux.Handle("/static/", srv.shim(http.FileServer(http.Dir(srv.assetPath))))
+	srv.mux.Handle("/stats", srv.shim(http.HandlerFunc(srv.statsHandler)))
+	srv.mux.Handle("/status", srv.shim(http.HandlerFunc(srv.statusHandler)))
 	if srv.enablePProf {
-		srv.mux.Handle("/debug/pprof/", srv.accessLogHandler(http.HandlerFunc(pprof.Index)))
-		srv.mux.Handle("/debug/pprof/cmdline", srv.accessLogHandler(http.HandlerFunc(pprof.Cmdline)))
-		srv.mux.Handle("/debug/pprof/profile", srv.accessLogHandler(http.HandlerFunc(pprof.Profile)))
-		srv.mux.Handle("/debug/pprof/symbol", srv.accessLogHandler(http.HandlerFunc(pprof.Symbol)))
+		srv.mux.Handle("/debug/pprof/", srv.shim(http.HandlerFunc(pprof.Index)))
+		srv.mux.Handle("/debug/pprof/cmdline", srv.shim(http.HandlerFunc(pprof.Cmdline)))
+		srv.mux.Handle("/debug/pprof/profile", srv.shim(http.HandlerFunc(pprof.Profile)))
+		srv.mux.Handle("/debug/pprof/symbol", srv.shim(http.HandlerFunc(pprof.Symbol)))
 	}
 	if srv.enableOAuth {
 		srv.mux.HandleFunc("/auth", srv.oauthClient.AuthHandler)
@@ -322,7 +322,7 @@ func memInfo() (total, free, avail uint64) {
 	return
 }
 
-func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
+func (srv *notebookServer) shim(h http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ACCESS: %s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		switch srv.addr {
