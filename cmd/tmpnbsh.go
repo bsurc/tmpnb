@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,6 +23,7 @@ var (
 	tmpnbid   string
 	tmpnbhost string
 	tick      time.Duration
+	phonehome uint32
 )
 
 func checkin() {
@@ -29,6 +31,9 @@ func checkin() {
 	for {
 		select {
 		case <-ticker.C:
+			if !atomic.CompareAndSwapUint32(&phonehome, 1, 0) {
+				continue
+			}
 			u := url.URL{
 				Host: tmpnbhost,
 				Path: path.Join("/", "book", tmpnbid),
@@ -59,6 +64,16 @@ func checkin() {
 	}
 }
 
+type writer struct{}
+
+func (w writer) Write(p []byte) (int, error) {
+	n, err := os.Stdout.Write(p)
+	if n > 0 {
+		atomic.CompareAndSwapUint32(&phonehome, 0, 1)
+	}
+	return n, err
+}
+
 func main() {
 	flag.BoolVar(&insecure, "insecure", false, "use http instead of https")
 	flagLog := flag.String("log", "", "log file for verbose output")
@@ -68,19 +83,16 @@ func main() {
 		fout io.WriteCloser
 		err  error
 	)
-	if *flagLog != "" {
+	switch *flagLog {
+	case "":
+		fout, _ = os.Create(os.DevNull)
+	default:
 		fout, err = os.Create(*flagLog)
-		if err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		fout, err = os.Create(os.DevNull)
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
 	defer fout.Close()
-	log.SetOutput(fout)
 
 	tmpnbid = os.Getenv("TMPNB_ID")
 	tmpnbhost = os.Getenv("TMPNB_HOST")
@@ -93,6 +105,7 @@ func main() {
 		shell = "bash"
 	}
 
+	log.SetOutput(fout)
 	go checkin()
 
 	sh := exec.Command(shell, "-i")
@@ -101,8 +114,10 @@ func main() {
 		"TMPNB_HOST=" + tmpnbhost,
 		"TERM=" + os.Getenv("TERM"),
 	}
+	var w writer
 	sh.Stdin = os.Stdin
-	sh.Stdout = os.Stdout
+	sh.Stdout = w
+	//sh.Stdout = os.Stdout
 	sh.Stderr = os.Stderr
 	err = sh.Run()
 	if err != nil {
