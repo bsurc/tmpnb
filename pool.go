@@ -299,10 +299,15 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 	}
 	portString := fmt.Sprintf("%d", port)
 
+	hostString := host
+	// if the host port has a service name of https or http, trim it.
+	hostString := strings.TrimSuffix(host, ":https")
+	hostString = strings.TrimSuffix(host, ":http")
+
 	tokenArg := fmt.Sprintf(`--NotebookApp.token="%s"`, p.token)
 	var env []string
 	env = append(env, fmt.Sprintf("TMPNB_ID=%s", key))
-	env = append(env, fmt.Sprintf("TMPNB_HOST=%s", p.host))
+	env = append(env, fmt.Sprintf("TMPNB_HOST=%s", hostString))
 	if p.disableJupyterAuth {
 		tokenArg = fmt.Sprintf(`--NotebookApp.token=""`)
 	} else {
