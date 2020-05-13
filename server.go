@@ -472,7 +472,14 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		http.Error(w, "image is currently being re-built", http.StatusServiceUnavailable)
 		return
 	}
-	sKey, _ := r.Cookie("bsuJupyter")
+	var sKey string
+	cookie, err := r.Cookie("bsuJupyter")
+	if err != nil {
+		sKey = ""
+	} else {
+		sKey = cookie.String()
+	}
+
 	nb, err := srv.pool.newNotebook(imageName, pull, email, sKey)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
