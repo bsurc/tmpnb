@@ -19,11 +19,12 @@ import (
 )
 
 var (
-	insecure  bool
-	tmpnbid   string
-	tmpnbhost string
-	tick      time.Duration
-	phonehome uint32
+	insecure     bool
+	tmpnbid      string
+	tmpnbhost    string
+	tmpnbsession string
+	tick         time.Duration
+	phonehome    uint32
 )
 
 func checkin() {
@@ -50,7 +51,8 @@ func checkin() {
 				log.Print(err)
 				continue
 			}
-			req.AddCookie(&http.Cookie{"bsuJupyter", os.Getenv("TMPNB_SESSION")})
+			ck := &http.Cookie{Name: "bsuJupyter", Value: os.Getenv("TMPNB_SESSION")}
+			req.AddCookie(ck)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				log.Print(err)
@@ -97,6 +99,7 @@ func main() {
 
 	tmpnbid = os.Getenv("TMPNB_ID")
 	tmpnbhost = os.Getenv("TMPNB_HOST")
+	tmpnbsession = os.Getenv("TMPNB_SESSION")
 	shell := os.Getenv("SHELL")
 	if tmpnbid == "" || tmpnbhost == "" {
 		log.Fatalf("TMPNB_ID or TMPNB_HOST not set, just use %s, not tmpnbsh", shell)
@@ -113,6 +116,7 @@ func main() {
 	sh.Env = []string{
 		"TMPNB_ID=" + tmpnbid,
 		"TMPNB_HOST=" + tmpnbhost,
+		"TMPNB_SESSION=" + tmpnbsession,
 		"TERM=" + os.Getenv("TERM"),
 	}
 	var w writer
