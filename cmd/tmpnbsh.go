@@ -50,6 +50,7 @@ func checkin() {
 				log.Print(err)
 				continue
 			}
+			req.AddCookie(&http.Cookie{"bsuJupyter", os.Getenv("TMPNB_SESSION")})
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				log.Print(err)
