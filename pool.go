@@ -299,10 +299,9 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 	}
 	portString := fmt.Sprintf("%d", port)
 
-	hostString := host
 	// if the host port has a service name of https or http, trim it.
-	hostString := strings.TrimSuffix(host, ":https")
-	hostString = strings.TrimSuffix(host, ":http")
+	hostString := strings.TrimSuffix(p.host, ":https")
+	hostString = strings.TrimSuffix(p.host, ":http")
 
 	tokenArg := fmt.Sprintf(`--NotebookApp.token="%s"`, p.token)
 	var env []string
