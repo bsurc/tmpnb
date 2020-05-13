@@ -126,6 +126,9 @@ type notebookPool struct {
 	// deregisterMux is a channel for sending a path that needs to be
 	// de-registered from the server mux.
 	deregisterMux chan string
+
+	// host holds the hostname for checkins for bash
+	host string
 }
 
 // errNotebookPoolFull indicates the pool is at maxContainers
@@ -133,7 +136,7 @@ var errNotebookPoolFull = errors.New("container pool hit max size limit")
 
 // newNotebookPool creates a notebookPool and sets defaults, overriding some
 // with passed arguments.
-func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Duration, persistent bool) (*notebookPool, error) {
+func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Duration, persistent bool, host string) (*notebookPool, error) {
 	if imageRegexp == "" {
 		imageRegexp = jupyterNotebookImageMatch
 	}
@@ -178,6 +181,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		containerLifetime: lifetime,
 		killCollection:    make(chan struct{}),
 		deregisterMux:     make(chan string),
+		host:              host,
 	}
 	pool.startCollector(time.Duration(int64(lifetime) / collectionFraction))
 	pool.lastCollMu.Lock()
@@ -298,6 +302,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 	tokenArg := fmt.Sprintf(`--NotebookApp.token="%s"`, p.token)
 	var env []string
 	env = append(env, fmt.Sprintf("TMPNB_ID=%s", key))
+	env = append(env, fmt.Sprintf("TMPNB_HOST=%s", p.host))
 	if p.disableJupyterAuth {
 		tokenArg = fmt.Sprintf(`--NotebookApp.token=""`)
 	} else {

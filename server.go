@@ -137,7 +137,7 @@ func main() {
 	}
 
 	var err error
-	srv.pool, err = newNotebookPool(srv.imageRegexp, srv.maxContainers, srv.containerLifetime, srv.persistent)
+	srv.pool, err = newNotebookPool(srv.imageRegexp, srv.maxContainers, srv.containerLifetime, srv.persistent, srv.host+srv.addr)
 	if err != nil {
 		log.Fatal(err)
 	}
