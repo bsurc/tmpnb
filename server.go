@@ -477,7 +477,7 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		sKey = ""
 	} else {
-		sKey = cookie.String()
+		sKey = cookie.Value
 	}
 
 	nb, err := srv.pool.newNotebook(imageName, pull, email, sKey)
