@@ -204,7 +204,7 @@ func newKey(n int) string {
 }
 
 // newNotebook initializes and sets values for a new notebook.
-func (p *notebookPool) newNotebook(image string, pull bool, email string) (*notebook, error) {
+func (p *notebookPool) newNotebook(image string, pull bool, email, sKey string) (*notebook, error) {
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
 	if err != nil {
@@ -301,7 +301,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 
 	// if the host port has a service name of https or http, trim it.
 	hostString := strings.TrimSuffix(p.host, ":https")
-	hostString = strings.TrimSuffix(p.host, ":http")
+	hostString = strings.TrimSuffix(hostString, ":http")
 
 	log.Printf("notebook host: %s", hostString)
 
@@ -309,6 +309,7 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 	var env []string
 	env = append(env, fmt.Sprintf("TMPNB_ID=%s", key))
 	env = append(env, fmt.Sprintf("TMPNB_HOST=%s", hostString))
+	env = append(env, fmt.Sprintf("TMPNB_SESSION=%s", sKey))
 	if p.disableJupyterAuth {
 		tokenArg = fmt.Sprintf(`--NotebookApp.token=""`)
 	} else {
@@ -556,7 +557,6 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 		age := time.Now().Sub(c.lastAccessed)
 		if age.Seconds() > p.containerLifetime.Seconds() || force {
 			log.Printf("age: %v\n", age)
-			//trash = append(trash, *c)
 			trash = append(trash, notebook{
 				id:           c.id,
 				key:          c.key,
