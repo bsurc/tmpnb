@@ -303,6 +303,8 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 	hostString := strings.TrimSuffix(p.host, ":https")
 	hostString = strings.TrimSuffix(p.host, ":http")
 
+	log.Printf("notebook host: %s", hostString)
+
 	tokenArg := fmt.Sprintf(`--NotebookApp.token="%s"`, p.token)
 	var env []string
 	env = append(env, fmt.Sprintf("TMPNB_ID=%s", key))
