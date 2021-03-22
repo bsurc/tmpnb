@@ -106,9 +106,6 @@ type notebookPool struct {
 	// containerLifetime governs when the container resources are reclaimed.
 	containerLifetime time.Duration
 
-	// disableJupyterAuth controls using an auth token
-	disableJupyterAuth bool
-
 	// token is the security token for auto-auth
 	token string
 
@@ -305,16 +302,10 @@ func (p *notebookPool) newNotebook(image string, pull bool, email, sKey string) 
 
 	log.Printf("notebook host: %s", hostString)
 
-	tokenArg := fmt.Sprintf(`--NotebookApp.token="%s"`, p.token)
 	var env []string
 	env = append(env, fmt.Sprintf("TMPNB_ID=%s", key))
 	env = append(env, fmt.Sprintf("TMPNB_HOST=%s", hostString))
 	env = append(env, fmt.Sprintf("TMPNB_SESSION=%s", sKey))
-	if p.disableJupyterAuth {
-		tokenArg = fmt.Sprintf(`--NotebookApp.token=""`)
-	} else {
-		env = []string{fmt.Sprintf("CONFIGPROXY_AUTH_TOKEN=%s", p.token)}
-	}
 	var pSet = nat.PortSet{}
 	pt, err := nat.NewPort("tcp", portString)
 	pSet[pt] = struct{}{}
@@ -329,7 +320,8 @@ func (p *notebookPool) newNotebook(image string, pull bool, email, sKey string) 
 			`--ip=0.0.0.0`,
 			fmt.Sprintf("--NotebookApp.base_url=%s", path.Join("/book", key)),
 			`--NotebookApp.port_retries=0`,
-			tokenArg,
+			`--NotebookApp.password=''`,
+			`--NotebookApp.token=''`,
 			`--NotebookApp.disable_check_xsrf=True`,
 		},
 		Env:          env,

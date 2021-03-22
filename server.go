@@ -73,8 +73,6 @@ type notebookServer struct {
 
 	// pool manages the containers
 	pool *notebookPool
-	// enableJupyterAuth disables an internal security feature
-	enableJupyterAuth bool
 	// containerLifetime is the time a container is allowed to be idle before
 	// being collected
 	containerLifetime time.Duration
@@ -117,7 +115,6 @@ func main() {
 	flag.DurationVar(&srv.containerLifetime, "lifetime", 10*time.Minute, "idle container lifetime")
 	flag.StringVar(&srv.imageRegexp, "imageregexp", allImageMatch, "allowed image regexp")
 	flag.IntVar(&srv.maxContainers, "maxcontainers", defaultMaxContainers, "maximum live containers")
-	flag.BoolVar(&srv.enableJupyterAuth, "jupyterauth", false, "enable internal auth in jupyter")
 	flag.BoolVar(&srv.persistent, "persist", false, "enable persistent mode (experimental)")
 
 	flag.StringVar(&whitelist, "oauthwhite", "", "oauth whitelist exceptions")
@@ -144,8 +141,6 @@ func main() {
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
-	srv.pool.disableJupyterAuth = !srv.enableJupyterAuth
-
 	// Parse the whitelist for oauth
 	srv.oauthWhitelist = map[string]struct{}{}
 	if whitelist != "" {
