@@ -14,4 +14,4 @@ USER $NB_USER
 
 WORKDIR $HOME
 
-RUN git clone https://gitlab.com/Jdbeck66/programming-with-julia
+RUN git clone https://gitlab.com/Jdbeck66/programming-with-julia.git

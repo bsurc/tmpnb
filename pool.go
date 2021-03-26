@@ -306,6 +306,9 @@ func (p *notebookPool) newNotebook(image string, pull bool, email, sKey string) 
 	env = append(env, fmt.Sprintf("TMPNB_ID=%s", key))
 	env = append(env, fmt.Sprintf("TMPNB_HOST=%s", hostString))
 	env = append(env, fmt.Sprintf("TMPNB_SESSION=%s", sKey))
+	// TODO(kyle): transition to jupyter lab.  It is unclear what this will
+	// affect.
+	//env = append(env, "JUPYTER_ENABLE_LAB=yes")
 	var pSet = nat.PortSet{}
 	pt, err := nat.NewPort("tcp", portString)
 	pSet[pt] = struct{}{}
