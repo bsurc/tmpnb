@@ -233,7 +233,7 @@ func main() {
 
 	srv.templates = template.Must(template.ParseGlob(filepath.Join(srv.assetPath, "templates", "*.html")))
 
-	quit := make(chan os.Signal)
+	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
 	go func() {
 		<-quit
