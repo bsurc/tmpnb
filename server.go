@@ -64,8 +64,6 @@ type notebookServer struct {
 	enableStats bool
 	// enableACME enables TLS via letsencrypt
 	enableACME bool
-	// minTLS is the minimum TLS version to support
-	minTLS int
 	// mux routes http traffic, it is a copy of http.ServerMux
 	mux *ServeMux
 	// embedded server
@@ -75,8 +73,6 @@ type notebookServer struct {
 
 	// pool manages the containers
 	pool *notebookPool
-	// enableJupyterAuth disables an internal security feature
-	enableJupyterAuth bool
 	// containerLifetime is the time a container is allowed to be idle before
 	// being collected
 	containerLifetime time.Duration
@@ -119,13 +115,10 @@ func main() {
 	flag.DurationVar(&srv.containerLifetime, "lifetime", 10*time.Minute, "idle container lifetime")
 	flag.StringVar(&srv.imageRegexp, "imageregexp", allImageMatch, "allowed image regexp")
 	flag.IntVar(&srv.maxContainers, "maxcontainers", defaultMaxContainers, "maximum live containers")
-	flag.BoolVar(&srv.enableJupyterAuth, "jupyterauth", false, "enable internal auth in jupyter")
 	flag.BoolVar(&srv.persistent, "persist", false, "enable persistent mode (experimental)")
 
 	flag.StringVar(&whitelist, "oauthwhite", "", "oauth whitelist exceptions")
 	flag.StringVar(&srv.oauthRegexp, "oauthregexp", "", "oauth regular expression(bsu=BSU emails)")
-
-	flag.IntVar(&srv.minTLS, "mintls", 2, "minimum tls version")
 
 	flagInfo := flag.Bool("info", false, "print general info and exit")
 
@@ -137,7 +130,7 @@ func main() {
 	}
 
 	var err error
-	srv.pool, err = newNotebookPool(srv.imageRegexp, srv.maxContainers, srv.containerLifetime, srv.persistent)
+	srv.pool, err = newNotebookPool(srv.imageRegexp, srv.maxContainers, srv.containerLifetime, srv.persistent, srv.host+srv.addr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -148,8 +141,6 @@ func main() {
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
-	srv.pool.disableJupyterAuth = !srv.enableJupyterAuth
-
 	// Parse the whitelist for oauth
 	srv.oauthWhitelist = map[string]struct{}{}
 	if whitelist != "" {
@@ -216,19 +207,19 @@ func main() {
 	srv.mux = &ServeMux{}
 	// handle '/' explicitly.  If the path isn't exactly '/', the handler issues
 	// 404.
-	srv.mux.Handle("/", srv.accessLogHandler(http.HandlerFunc(srv.rootHandler)))
-	srv.mux.Handle("/about", srv.accessLogHandler(http.HandlerFunc(srv.aboutHandler)))
-	srv.mux.Handle("/list", srv.accessLogHandler(http.HandlerFunc(srv.listImagesHandler)))
-	srv.mux.Handle("/new", srv.accessLogHandler(http.HandlerFunc(srv.newNotebookHandler)))
-	srv.mux.Handle("/privacy", srv.accessLogHandler(http.HandlerFunc(srv.privacyHandler)))
-	srv.mux.Handle("/static/", srv.accessLogHandler(http.FileServer(http.Dir(srv.assetPath))))
-	srv.mux.Handle("/stats", srv.accessLogHandler(http.HandlerFunc(srv.statsHandler)))
-	srv.mux.Handle("/status", srv.accessLogHandler(http.HandlerFunc(srv.statusHandler)))
+	srv.mux.Handle("/", srv.shim(http.HandlerFunc(srv.rootHandler)))
+	srv.mux.Handle("/about", srv.shim(http.HandlerFunc(srv.aboutHandler)))
+	srv.mux.Handle("/list", srv.shim(http.HandlerFunc(srv.listImagesHandler)))
+	srv.mux.Handle("/new", srv.shim(http.HandlerFunc(srv.newNotebookHandler)))
+	srv.mux.Handle("/privacy", srv.shim(http.HandlerFunc(srv.privacyHandler)))
+	srv.mux.Handle("/static/", srv.shim(http.FileServer(http.Dir(srv.assetPath))))
+	srv.mux.Handle("/stats", srv.shim(http.HandlerFunc(srv.statsHandler)))
+	srv.mux.Handle("/status", srv.shim(http.HandlerFunc(srv.statusHandler)))
 	if srv.enablePProf {
-		srv.mux.Handle("/debug/pprof/", srv.accessLogHandler(http.HandlerFunc(pprof.Index)))
-		srv.mux.Handle("/debug/pprof/cmdline", srv.accessLogHandler(http.HandlerFunc(pprof.Cmdline)))
-		srv.mux.Handle("/debug/pprof/profile", srv.accessLogHandler(http.HandlerFunc(pprof.Profile)))
-		srv.mux.Handle("/debug/pprof/symbol", srv.accessLogHandler(http.HandlerFunc(pprof.Symbol)))
+		srv.mux.Handle("/debug/pprof/", srv.shim(http.HandlerFunc(pprof.Index)))
+		srv.mux.Handle("/debug/pprof/cmdline", srv.shim(http.HandlerFunc(pprof.Cmdline)))
+		srv.mux.Handle("/debug/pprof/profile", srv.shim(http.HandlerFunc(pprof.Profile)))
+		srv.mux.Handle("/debug/pprof/symbol", srv.shim(http.HandlerFunc(pprof.Symbol)))
 	}
 	if srv.enableOAuth {
 		srv.mux.HandleFunc("/auth", srv.oauthClient.AuthHandler)
@@ -242,7 +233,7 @@ func main() {
 
 	srv.templates = template.Must(template.ParseGlob(filepath.Join(srv.assetPath, "templates", "*.html")))
 
-	quit := make(chan os.Signal)
+	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
 	go func() {
 		<-quit
@@ -275,13 +266,7 @@ func main() {
 		}()
 		log.Print("setting up certificate manager...")
 		srv.TLSConfig = &tls.Config{GetCertificate: m.GetCertificate}
-		v := uint16(srv.minTLS)
-		switch v {
-		case 0, 1, 2, 3:
-			srv.TLSConfig.MinVersion = v
-		default:
-			log.Fatalf("invalid tls version: %d", srv.minTLS)
-		}
+		srv.TLSConfig.MinVersion = tls.VersionTLS12
 		log.Print("certificate manager set up.")
 		log.Print("starting https server...")
 		log.Fatal(srv.ListenAndServeTLS("", ""))
@@ -322,7 +307,7 @@ func memInfo() (total, free, avail uint64) {
 	return
 }
 
-func (srv *notebookServer) accessLogHandler(h http.Handler) http.Handler {
+func (srv *notebookServer) shim(h http.Handler) http.Handler {
 	f := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ACCESS: %s [%s] %s [%s]", r.RemoteAddr, r.Method, r.RequestURI, r.UserAgent())
 		switch srv.addr {
@@ -472,7 +457,15 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		http.Error(w, "image is currently being re-built", http.StatusServiceUnavailable)
 		return
 	}
-	nb, err := srv.pool.newNotebook(imageName, pull, email)
+	var sKey string
+	cookie, err := r.Cookie("bsuJupyter")
+	if err != nil {
+		sKey = ""
+	} else {
+		sKey = cookie.Value
+	}
+
+	nb, err := srv.pool.newNotebook(imageName, pull, email, sKey)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		log.Print(err)

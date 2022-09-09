@@ -51,13 +51,12 @@ func TestNewNotebook(t *testing.T) {
 	if testing.Short() {
 		t.Skip(skipDocker)
 	}
-	p, err := newNotebookPool(".*", 2, time.Minute*2, false)
+	p, err := newNotebookPool(".*", 2, time.Minute*2, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.disableJupyterAuth = true
 	p.stopCollector()
-	nb, err := p.newNotebook(testNotebook, false, "")
+	nb, err := p.newNotebook(testNotebook, false, "", "")
 	if err != nil {
 		t.Error(err)
 	}
@@ -77,15 +76,14 @@ func TestCollection(t *testing.T) {
 	if testing.Short() {
 		t.Skip(skipDocker)
 	}
-	p, err := newNotebookPool(".*", 2, time.Second*5, false)
+	p, err := newNotebookPool(".*", 2, time.Second*5, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.disableJupyterAuth = true
 	// Stop the collector, then restart it with an aggressive rate
 	p.stopCollector()
 	p.startCollector(time.Second)
-	nb, err := p.newNotebook(testNotebook, false, "")
+	nb, err := p.newNotebook(testNotebook, false, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,13 +107,12 @@ func TestZombies(t *testing.T) {
 	if testing.Short() {
 		t.Skip(skipDocker)
 	}
-	p, err := newNotebookPool(".*", 2, time.Minute*2, false)
+	p, err := newNotebookPool(".*", 2, time.Minute*2, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.disableJupyterAuth = true
 	p.stopCollector()
-	nb, err := p.newNotebook(testNotebook, false, "")
+	nb, err := p.newNotebook(testNotebook, false, "", "")
 	if err != nil {
 		t.Error(err)
 	}

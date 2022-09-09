@@ -106,9 +106,6 @@ type notebookPool struct {
 	// containerLifetime governs when the container resources are reclaimed.
 	containerLifetime time.Duration
 
-	// disableJupyterAuth controls using an auth token
-	disableJupyterAuth bool
-
 	// token is the security token for auto-auth
 	token string
 
@@ -126,6 +123,9 @@ type notebookPool struct {
 	// deregisterMux is a channel for sending a path that needs to be
 	// de-registered from the server mux.
 	deregisterMux chan string
+
+	// host holds the hostname for checkins for bash
+	host string
 }
 
 // errNotebookPoolFull indicates the pool is at maxContainers
@@ -133,7 +133,7 @@ var errNotebookPoolFull = errors.New("container pool hit max size limit")
 
 // newNotebookPool creates a notebookPool and sets defaults, overriding some
 // with passed arguments.
-func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Duration, persistent bool) (*notebookPool, error) {
+func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Duration, persistent bool, host string) (*notebookPool, error) {
 	if imageRegexp == "" {
 		imageRegexp = jupyterNotebookImageMatch
 	}
@@ -178,6 +178,7 @@ func newNotebookPool(imageRegexp string, maxContainers int, lifetime time.Durati
 		containerLifetime: lifetime,
 		killCollection:    make(chan struct{}),
 		deregisterMux:     make(chan string),
+		host:              host,
 	}
 	pool.startCollector(time.Duration(int64(lifetime) / collectionFraction))
 	pool.lastCollMu.Lock()
@@ -200,7 +201,7 @@ func newKey(n int) string {
 }
 
 // newNotebook initializes and sets values for a new notebook.
-func (p *notebookPool) newNotebook(image string, pull bool, email string) (*notebook, error) {
+func (p *notebookPool) newNotebook(image string, pull bool, email, sKey string) (*notebook, error) {
 	ctx := context.Background()
 	cli, err := client.NewEnvClient()
 	if err != nil {
@@ -295,14 +296,19 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 	}
 	portString := fmt.Sprintf("%d", port)
 
-	tokenArg := fmt.Sprintf(`--NotebookApp.token='%s'`, p.token)
+	// if the host port has a service name of https or http, trim it.
+	hostString := strings.TrimSuffix(p.host, ":https")
+	hostString = strings.TrimSuffix(hostString, ":http")
+
+	log.Printf("notebook host: %s", hostString)
+
 	var env []string
 	env = append(env, fmt.Sprintf("TMPNB_ID=%s", key))
-	if p.disableJupyterAuth {
-		tokenArg = fmt.Sprintf(`--NotebookApp.token=''`)
-	} else {
-		env = []string{fmt.Sprintf("CONFIGPROXY_AUTH_TOKEN=%s", p.token)}
-	}
+	env = append(env, fmt.Sprintf("TMPNB_HOST=%s", hostString))
+	env = append(env, fmt.Sprintf("TMPNB_SESSION=%s", sKey))
+	// TODO(kyle): transition to jupyter lab.  It is unclear what this will
+	// affect.
+	//env = append(env, "JUPYTER_ENABLE_LAB=yes")
 	var pSet = nat.PortSet{}
 	pt, err := nat.NewPort("tcp", portString)
 	pSet[pt] = struct{}{}
@@ -317,7 +323,8 @@ func (p *notebookPool) newNotebook(image string, pull bool, email string) (*note
 			`--ip=0.0.0.0`,
 			fmt.Sprintf("--NotebookApp.base_url=%s", path.Join("/book", key)),
 			`--NotebookApp.port_retries=0`,
-			tokenArg,
+			`--NotebookApp.password=''`,
+			`--NotebookApp.token=''`,
 			`--NotebookApp.disable_check_xsrf=True`,
 		},
 		Env:          env,
@@ -545,7 +552,6 @@ func (p *notebookPool) releaseContainers(force, async bool) error {
 		age := time.Now().Sub(c.lastAccessed)
 		if age.Seconds() > p.containerLifetime.Seconds() || force {
 			log.Printf("age: %v\n", age)
-			//trash = append(trash, *c)
 			trash = append(trash, notebook{
 				id:           c.id,
 				key:          c.key,
