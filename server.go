@@ -314,6 +314,12 @@ func (srv *notebookServer) shim(h http.Handler) http.Handler {
 		case ":https", ":443":
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
+		fmt.Println(r.URL.Path)
+		switch r.URL.Path {
+		case "/", "/about", "/list", "/privacy", "/stats":
+			log.Print("setting csp")
+			setSecurityHeaders(w)
+		}
 		h.ServeHTTP(w, r)
 	}
 	if srv.enableOAuth {
@@ -548,6 +554,12 @@ func (srv *notebookServer) newNotebookHandler(w http.ResponseWriter, r *http.Req
 		Path:  handlerURL.Path,
 		Token: srv.pool.token,
 	})
+}
+
+func setSecurityHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Security-Policy", "default-src 'self'")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Content-Type-Options", "no-sniff")
 }
 
 // Handle the root request.  All un-muxed requests come through here, if it
