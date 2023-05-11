@@ -8,7 +8,7 @@ require (
 	github.com/bsurc/misc v0.0.0-20180430221856-9c570e2630d1
 	github.com/bsurc/oauth2 v0.1.0
 	github.com/bsurc/sessions v0.1.1 // indirect
-	github.com/docker/distribution v2.7.1+incompatible // indirect
+	github.com/docker/distribution v2.8.2+incompatible // indirect
 	github.com/docker/docker v1.13.1
 	github.com/docker/go-connections v0.4.0
 	github.com/docker/go-units v0.4.0 // indirect
